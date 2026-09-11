@@ -26,7 +26,7 @@ if not st.user.is_logged_in:
     st.info("본 시스템은 사전 등록된 허가 인원만 이용 가능합니다. 구글 계정으로 로그인해 주세요.")
     
     if st.button("🔑 Google 계정으로 로그인", type="primary"):
-        st.login()
+        st.login("google")
     st.stop()
 
 # 2) 허가되지 않은 이메일 차단 처리
