@@ -2,12 +2,14 @@ import os
 import sys
 import pandas as pd
 import streamlit as st
+import traceback  # 👈 에러 추적을 위해 추가됨
 
 # ==============================================================================
 # 0. [보안] 사내 및 외부 허가 인원 지정 (화이트리스트 방식)
 # ==============================================================================
 ALLOWED_EMAILS = [
     "pmy@buksan.pro",  # 👈 테스트 사용자 및 사용 허가 이메일 입력
+    "dlee@hanjin.com"
     # 추가로 허용할 이메일들을 여기에 계속 작성하세요.
 ]
 
@@ -49,20 +51,15 @@ if os.path.exists(view_dir_upper):
 elif os.path.exists(view_dir_lower):
     sys.path.append(view_dir_lower)
 
-# 💡 모듈 불러오기
+# 💡 [핵심 수정]: 모듈 불러오기 에러를 화면에 표시하도록 변경
 try:
-    from tab1_dispatch import render_dispatch_tab
-    from tab2_sellers import render_sellers_tab
-    from tab3_products import render_products_tab
-    from tab4_time_inflow import render_time_inflow_tab
-except ModuleNotFoundError:
-    try:
-        from views.tab1_dispatch import render_dispatch_tab
-        from views.tab2_sellers import render_sellers_tab
-        from views.tab3_products import render_products_tab
-        from views.tab4_time_inflow import render_time_inflow_tab
-    except ModuleNotFoundError:
-        pass
+    from views.tab1_dispatch import render_dispatch_tab
+    from views.tab2_sellers import render_sellers_tab
+    from views.tab3_products import render_products_tab
+    from views.tab4_time_inflow import render_time_inflow_tab
+except Exception as e:
+    st.error(f"🚨 **views 폴더 내부 파일을 불러오는 중 에러가 발생했습니다.** (누락된 패키지가 있을 확률이 높습니다)")
+    st.code(traceback.format_exc()) # 어떤 파일에서 무슨 에러가 났는지 상세히 출력합니다.
 
 # ==============================================================================
 # 2. 상수 정의
