@@ -3,6 +3,44 @@ import sys
 import pandas as pd
 import streamlit as st
 
+# --- 0. [보안] 허가된 사내/외부 계정만 접근 허용 ---
+# 💡 [접속 허용 목록]: 사용할 수 있게 허락할 구글 이메일 주소를 모두 적어주세요.
+ALLOWED_EMAILS = [
+    # 사내 허용 인원
+    "user1@mycompany.com",
+    "user2@mycompany.com",
+    "manager@mycompany.com",
+    
+    # 외부 워크스페이스 허용 인원 / 협력사 계정
+    "partner1@external.com",
+    "partner2@gmail.com",
+    # 필요할 때마다 여기에 이메일을 줄바꿈으로 계속 추가하시면 됩니다.
+]
+
+if not st.experimental_user.is_logged_in:
+    st.set_page_config(page_title="로그인 필요 | 물류 출고 현황 분석기", page_icon="🔒")
+    st.title("🔒 지정 사용자 전용 시스템 접속")
+    st.subheader("물류 출고 현황 분석 대시보드")
+    st.info("본 시스템은 사전 등록된 허가 인원만 이용 가능합니다. 구글 계정으로 로그인해 주세요.")
+    
+    if st.button("🔑 Google 계정으로 로그인", type="primary"):
+        st.login()
+    st.stop()
+
+# 로그인한 사용자의 이메일 확인
+user_email = str(st.experimental_user.email).strip().lower()
+allowed_emails_lower = [email.strip().lower() for email in ALLOWED_EMAILS]
+
+# 💡 허용 목록에 없는 이메일이면 차단
+if user_email not in allowed_emails_lower:
+    st.set_page_config(page_title="접근 제한 | 물류 출고 현황 분석기", page_icon="🚫")
+    st.error(f"🚫 접근 권한이 없습니다. ({user_email})")
+    st.warning("등록되지 않은 계정입니다. 시스템 관리자에게 권한 요청 후 다시 시도해 주세요.")
+    
+    if st.button("다른 계정으로 로그인"):
+        st.logout()
+    st.stop()  # 권한이 없으면 아래 대시보드 코드 실행 차단
+
 # --- 1. 작업 경로 등록 및 모듈 경로 설정 ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
