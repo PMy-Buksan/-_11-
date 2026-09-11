@@ -43,22 +43,23 @@ if user_email not in allowed_emails_lower:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 
-view_dir_upper = os.path.join(BASE_DIR, "View")
+# 💡 폴더명을 Views (대문자 V)로 우선 탐색하도록 수정
+view_dir_capital = os.path.join(BASE_DIR, "Views")
 view_dir_lower = os.path.join(BASE_DIR, "views")
 
-if os.path.exists(view_dir_upper):
-    sys.path.append(view_dir_upper)
+if os.path.exists(view_dir_capital):
+    sys.path.append(view_dir_capital)
 elif os.path.exists(view_dir_lower):
     sys.path.append(view_dir_lower)
 
-# 💡 [핵심 수정]: 모듈 불러오기 에러를 화면에 표시하도록 변경
+# 💡 [핵심 수정]: Views (대문자) 폴더에서 모듈을 불러오도록 변경
 try:
-    from views.tab1_dispatch import render_dispatch_tab
-    from views.tab2_sellers import render_sellers_tab
-    from views.tab3_products import render_products_tab
-    from views.tab4_time_inflow import render_time_inflow_tab
+    from Views.tab1_dispatch import render_dispatch_tab
+    from Views.tab2_sellers import render_sellers_tab
+    from Views.tab3_products import render_products_tab
+    from Views.tab4_time_inflow import render_time_inflow_tab
 except Exception as e:
-    st.error(f"🚨 **views 폴더 내부 파일을 불러오는 중 에러가 발생했습니다.** (누락된 패키지가 있을 확률이 높습니다)")
+    st.error(f"🚨 **Views 폴더 내부 파일을 불러오는 중 에러가 발생했습니다.** (누락된 패키지나 경로 문제일 수 있습니다)")
     st.code(traceback.format_exc()) # 어떤 파일에서 무슨 에러가 났는지 상세히 출력합니다.
 
 # ==============================================================================
@@ -463,7 +464,7 @@ elif selected_menu == "📦 3. 상품별 출고 현황":
     try:
         render_products_tab(group_type)
     except NameError:
-        st.error("❌ `render_products_tab` 모듈을 찾을 수 없습니다. `views/tab3_products.py` 파일의 존재 여부를 확인해 주세요.")
+        st.error("❌ `render_products_tab` 모듈을 찾을 수 없습니다. `Views/tab3_products.py` 파일의 존재 여부를 확인해 주세요.")
 
 elif selected_menu == "⏱️ 4. 시간대별 주문 인입 분석":
     try:
