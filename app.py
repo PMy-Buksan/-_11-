@@ -3,21 +3,23 @@ import sys
 import pandas as pd
 import streamlit as st
 
-# --- 0. [보안] 허가된 사내/외부 계정만 접근 허용 ---
-# 💡 [접속 허용 목록]: 사용할 수 있게 허락할 구글 이메일 주소를 모두 적어주세요.
+# ==============================================================================
+# 0. [보안] 사내 및 외부 허가 인원 지정 (화이트리스트 방식)
+# ==============================================================================
+# 💡 접속을 허용할 구글 이메일 주소를 모두 적어주세요. (대소문자 구분 없음)
 ALLOWED_EMAILS = [
-    # 사내 허용 인원
-    "user1@mycompany.com",
+    # [사내 허용 인원]
+    "pmy@buksan.pro",
     "user2@mycompany.com",
-    "manager@mycompany.com",
     
-    # 외부 워크스페이스 허용 인원 / 협력사 계정
-    "partner1@external.com",
+    # [외부 워크스페이스 / 파트너사 허용 인원]
+    "dlee@hanjin.com",
     "partner2@gmail.com",
-    # 필요할 때마다 여기에 이메일을 줄바꿈으로 계속 추가하시면 됩니다.
+    # 👈 필요에 따라 이메일 주소를 계속 추가해 주시면 됩니다.
 ]
 
-if not st.experimental_user.is_logged_in:
+# 1) 미로그인 상태 처리
+if not st.user.is_logged_in:
     st.set_page_config(page_title="로그인 필요 | 물류 출고 현황 분석기", page_icon="🔒")
     st.title("🔒 지정 사용자 전용 시스템 접속")
     st.subheader("물류 출고 현황 분석 대시보드")
@@ -27,11 +29,10 @@ if not st.experimental_user.is_logged_in:
         st.login()
     st.stop()
 
-# 로그인한 사용자의 이메일 확인
-user_email = str(st.experimental_user.email).strip().lower()
+# 2) 허가되지 않은 이메일 차단 처리
+user_email = str(st.user.email).strip().lower()
 allowed_emails_lower = [email.strip().lower() for email in ALLOWED_EMAILS]
 
-# 💡 허용 목록에 없는 이메일이면 차단
 if user_email not in allowed_emails_lower:
     st.set_page_config(page_title="접근 제한 | 물류 출고 현황 분석기", page_icon="🚫")
     st.error(f"🚫 접근 권한이 없습니다. ({user_email})")
@@ -39,9 +40,11 @@ if user_email not in allowed_emails_lower:
     
     if st.button("다른 계정으로 로그인"):
         st.logout()
-    st.stop()  # 권한이 없으면 아래 대시보드 코드 실행 차단
+    st.stop()  # 허가받지 않은 사용자는 여기서 코드 실행을 완전 중단합니다.
 
-# --- 1. 작업 경로 등록 및 모듈 경로 설정 ---
+# ==============================================================================
+# 1. 작업 경로 등록 및 모듈 경로 설정
+# ==============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 
@@ -53,29 +56,41 @@ if os.path.exists(view_dir_upper):
 elif os.path.exists(view_dir_lower):
     sys.path.append(view_dir_lower)
 
-# 💡 모듈 불러오기 (3번 상품별 출고 현황 모듈 정상 연결 및 경로 보장)
+# 💡 모듈 불러오기
 try:
     from tab1_dispatch import render_dispatch_tab
     from tab2_sellers import render_sellers_tab
     from tab3_products import render_products_tab
-    from tab4_time_inflow import render_time_inflow_tab  # 👈 4번 추가
+    from tab4_time_inflow import render_time_inflow_tab
 except ModuleNotFoundError:
     try:
         from views.tab1_dispatch import render_dispatch_tab
         from views.tab2_sellers import render_sellers_tab
         from views.tab3_products import render_products_tab
-        from views.tab4_time_inflow import render_time_inflow_tab  # 👈 4번 추가
+        from views.tab4_time_inflow import render_time_inflow_tab
     except ModuleNotFoundError:
-        pass # 파일이 없어도 앱이 터지지 않도록 예외 처리
+        pass
 
-# --- 2. 상수 정의 ---
+# ==============================================================================
+# 2. 상수 정의
+# ==============================================================================
 DELIVERY_TYPES = ['일반 배송', '당일 배송', '휴일 배송']
 PACKING_TYPES = ['단수', '단수단포', '단수합포', '이종합포', '혼합']
 
-# --- 3. 페이지 기본 설정 ---
+# ==============================================================================
+# 3. 페이지 기본 설정 및 사이드바 접속 정보
+# ==============================================================================
 st.set_page_config(page_title="물류 출고 현황 분석기", layout="wide")
 
-# --- 4. 사이드바: 메뉴 라우팅 & 파일 업로드 ---
+# 접속자 이메일 표시 및 로그아웃 버튼
+st.sidebar.caption(f"👤 접속 계정: {st.user.email}")
+if st.sidebar.button("🚪 로그아웃", key="logout_btn"):
+    st.logout()
+st.sidebar.markdown("---")
+
+# ==============================================================================
+# 4. 사이드바: 메뉴 라우팅 & 파일 업로드
+# ==============================================================================
 st.sidebar.markdown("""
     <style>
     div[data-testid="stRadio"] label p {
@@ -118,7 +133,9 @@ if uploaded_file is None:
     st.info("👈 좌측 사이드바에서 분석할 **출고현황 파일(.xlsx)**을 업로드해 주세요.")
     st.stop()
 
-# --- 5. 데이터 로드 및 미할당 처리 핵심 로직 ---
+# ==============================================================================
+# 5. 데이터 로드 및 미할당 처리 핵심 로직
+# ==============================================================================
 @st.cache_data(show_spinner="데이터 병합 및 시간대 분석 중...")
 def load_and_preprocess(main_file, opt_short_file):
     df_main = pd.read_excel(main_file, dtype={'출고번호': str})
@@ -172,7 +189,9 @@ except Exception as e:
     st.error(f"❌ 데이터 분석 중 오류가 발생했습니다: {e}")
     st.stop()
 
-# --- 6. 데이터 전처리 ---
+# ==============================================================================
+# 6. 데이터 전처리 및 대시보드 헤더
+# ==============================================================================
 def map_delivery_type(val):
     val_str = str(val).replace(" ", "")
     if '당일' in val_str:
@@ -189,7 +208,7 @@ df['배송대분류'] = df['배송유형'].apply(map_delivery_type)
 total_inflow = df['출고번호'].nunique()
 type_counts = df.groupby('배송대분류')['출고번호'].nunique().to_dict()
 
-# --- [A구역]: 다이내믹 서브텍스트 생성 로직 ---
+# [A구역]: 다이내믹 서브텍스트 생성 로직
 active_types = {k: v for k, v in type_counts.items() if v > 0}
 sorted_types = sorted(active_types.items(), key=lambda item: item[1], reverse=True)
 formatted_texts = [f"{k.replace(' 배송', '')} {v:,}건" for k, v in sorted_types]
@@ -198,7 +217,6 @@ dynamic_sub_text = f"↑ ({' | '.join(formatted_texts)})" if formatted_texts els
 title_col, summary_col = st.columns([6, 6])
 with title_col:
     st.title("🚚 물류 출고 현황 분석 대시보드")
-    # 💡 데이터 기준일시 서브텍스트 추가
     if '결제일시_dt' in df.columns and not df['결제일시_dt'].isna().all():
         main_max_str = df['결제일시_dt'].max().strftime('%y-%m-%d %H:%M')
         st.caption(f"(데이터 기준일시 : {main_max_str} 기준)")
@@ -219,7 +237,9 @@ with summary_col:
 
 st.markdown("---")
 
-# --- 8. [B/C구역] 좌/우 Split 헤더 영역 ---
+# ==============================================================================
+# 8. [B/C구역] 좌/우 Split 헤더 영역
+# ==============================================================================
 left_header_col, right_header_col = st.columns([6, 6])
 
 # --- [B구역]: 세부 출고 현황 ---
@@ -434,7 +454,9 @@ with right_header_col:
 
 st.markdown("---")
 
-# --- 9. [D구역] 메뉴별 라우터 ---
+# ==============================================================================
+# 9. [D구역] 메뉴별 라우터
+# ==============================================================================
 if selected_menu == "🚚 1. 배송 유형별 마감 예측":
     try:
         render_dispatch_tab(group_type)
@@ -447,7 +469,6 @@ elif selected_menu == "🏢 2. 셀러별 상세 현황":
     except NameError:
         st.info("🏢 2번 메뉴: 셀러별 상세 현황 모듈 연결 실패.")
 
-# 💡 [핵심 수정]: 3번 상품별 출고 현황 함수 연결 완료!
 elif selected_menu == "📦 3. 상품별 출고 현황":
     try:
         render_products_tab(group_type)
@@ -456,7 +477,7 @@ elif selected_menu == "📦 3. 상품별 출고 현황":
 
 elif selected_menu == "⏱️ 4. 시간대별 주문 인입 분석":
     try:
-        render_time_inflow_tab(group_type) # 👈 개발 중 문구 대신 함수 호출!
+        render_time_inflow_tab(group_type)
     except NameError:
         st.error("❌ `render_time_inflow_tab` 모듈을 찾을 수 없습니다.")
 
