@@ -52,7 +52,7 @@ if os.path.exists(view_dir_upper):
 elif os.path.exists(view_dir_lower):
     sys.path.append(view_dir_lower)
 
-# 💡 모듈 불러오기 (개발용 구조 그대로)
+# 💡 탭 모듈 불러오기
 try:
     from tab1_dispatch import render_dispatch_tab
     from tab2_sellers import render_sellers_tab
@@ -74,11 +74,11 @@ except ModuleNotFoundError:
             from views.tab4_time_inflow import render_time_inflow_tab  
             from views.tab5_combinations import render_combinations_tab  
         except Exception as e:
-            st.error(f"🚨 Views 모듈 로드 중 에러 발생: {e}")
+            st.error(f"🚨 Views 폴더 내 모듈 로드 중 에러 발생: {e}")
             st.code(traceback.format_exc())
 
 # ==============================================================================
-# 2. 개발용 상수 정의 (컬럼 다이어트 및 SKU 세팅)
+# 2. 상수 정의
 # ==============================================================================
 DELIVERY_TYPES = ['일반 배송', '당일 배송', '휴일 배송']
 PACKING_TYPES = ['단수', '단수단포', '단수합포', '이종합포', '혼합']
@@ -92,13 +92,13 @@ REQUIRED_COLUMNS = [
 DRY_ICE_SKUS = ['40574128111']
 
 # ==============================================================================
-# 3. 페이지 기본 설정 및 여백 최적화 (개발용 최신 스타일)
+# 3. 페이지 기본 설정 및 여백 최적화 CSS
 # ==============================================================================
 st.set_page_config(page_title="스마트 물류 출고 대시보드", layout="wide")
 
 st.markdown("""
     <style>
-    /* 상단 패딩 안전값 조절 (스피너 및 타이틀 짤림 방지) */
+    /* 상단 패딩 조절 (짤림 방지) */
     .block-container {
         padding-top: 3.0rem !important;
         padding-bottom: 1rem !important;
@@ -119,14 +119,13 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 접속자 계정 정보 사이드바 표기 (배포용 로그인 정보)
 st.sidebar.caption(f"👤 접속 계정: {st.user.email}")
 if st.sidebar.button("🚪 로그아웃", key="logout_btn"):
     st.logout()
 st.sidebar.markdown("---")
 
 # ==============================================================================
-# 4. 사이드바: 메뉴 라우팅 & 개발용 파일 업로드 구조
+# 4. 사이드바 메뉴 및 파일 업로드
 # ==============================================================================
 st.sidebar.markdown("""
     <style>
@@ -160,7 +159,6 @@ uploaded_file = st.sidebar.file_uploader(
 
 st.sidebar.markdown("---")
 
-# 💡 [개발용 기능 100% 반영] 선택 파일 업로드 아코디언
 with st.sidebar.expander("▶️ 선택 파일 업로드", expanded=False):
     st.markdown("추가 분석이 필요한 경우에만 업로드하세요.")
     prev_file = st.file_uploader("1. 전일 미출고 실적 (선택)", type=["xlsx", "xls"], key="prev_file")
@@ -170,23 +168,20 @@ if uploaded_file is None:
     st.info("👈 좌측 사이드바에서 분석할 **당일 출고현황 파일(.xlsx)**을 업로드해 주세요.")
     st.stop()
 
-# =====================================================================
-# 🚨 [방어막 1] 파일 로드 전 필수 컬럼 검증
-# =====================================================================
 try:
     df_preview = pd.read_excel(uploaded_file, nrows=0) 
     uploaded_cols = df_preview.columns.tolist()
     missing_cols = [col for col in REQUIRED_COLUMNS if col not in uploaded_cols]
     
     if missing_cols:
-        st.sidebar.error(f"❌ 업로드하신 파일에 필수 컬럼이 누락되어 작업을 진행할 수 없습니다.\n\n**[부족한 컬럼]**\n{', '.join(missing_cols)}")
+        st.sidebar.error(f"❌ 업로드하신 파일에 필수 컬럼이 누락되었습니다.\n\n**[부족한 컬럼]**\n{', '.join(missing_cols)}")
         st.stop()
 except Exception as e:
     st.sidebar.error("파일을 읽는 중 문제가 발생했습니다. 엑셀 형식을 확인해 주세요.")
     st.stop()
 
 # ==============================================================================
-# 5. 개발용 최신 데이터 로드 및 전처리 핵심 로직 (3개 파일 통합 병합 버그 수정판)
+# 5. 핵심 데이터 병합 및 정제 (정확한 수치 산출 로직)
 # ==============================================================================
 @st.cache_data(show_spinner="데이터 다이어트 및 병합 분석 중...")
 def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
@@ -195,6 +190,7 @@ def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
     if opt_prev_file is not None:
         if '출고예정일' in df_main.columns:
             target_date_str = str(df_main['출고예정일'].mode()[0])
+            # 💡 [핵심] 당일 03:00 이전에 처리된 전일자 건들은 병합하지 않고 삭제합니다.
             cutoff_time = pd.to_datetime(target_date_str) + pd.Timedelta(hours=3)
             
             try:
@@ -205,7 +201,7 @@ def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
                 df_prev_filtered = df_prev[keep_mask].drop(columns=['출고일자_dt'])
                 
                 df_main = pd.concat([df_main, df_prev_filtered], ignore_index=True)
-                # 💡 [버그 픽스] 출고번호 + 기준재고번호 복합 중복 제거
+                # 💡 [핵심] 출고번호와 상품명(SKU)을 동시에 기준으로 중복을 완벽히 제거합니다.
                 df_main = df_main.drop_duplicates(subset=['출고번호', '기준재고번호'], keep='last')
                 
             except ValueError:
@@ -263,7 +259,7 @@ except Exception as e:
     st.stop()
 
 # ==============================================================================
-# 6. 개발용 전처리 및 타이틀/출고예정일 표기
+# 6. 전처리 및 대시보드 상단 요약
 # ==============================================================================
 def map_delivery_type(val):
     val_str = str(val).replace(" ", "")
@@ -280,7 +276,7 @@ df['배송대분류'] = df['배송유형'].apply(map_delivery_type)
 total_inflow = df['출고번호'].nunique()
 type_counts = df.groupby('배송대분류')['출고번호'].nunique().to_dict()
 
-# 💡 [개발용 기능 100% 반영] 출고 예정일자 표기
+# 출고 예정일자 파싱
 if '출고예정일' in df.columns and not df['출고예정일'].isna().all():
     target_date_val = str(df['출고예정일'].mode()[0])
     if len(target_date_val) == 8 and target_date_val.isdigit():
@@ -290,7 +286,6 @@ if '출고예정일' in df.columns and not df['출고예정일'].isna().all():
 else:
     formatted_target_date = "미확인"
 
-# --- [A구역]: 개발용 최신 타이틀 및 메인 서브 현황 ---
 active_types = {k: v for k, v in type_counts.items() if v > 0}
 sorted_types = sorted(active_types.items(), key=lambda item: item[1], reverse=True)
 formatted_texts = [f"{k.replace(' 배송', '')} {v:,}건" for k, v in sorted_types]
@@ -298,7 +293,6 @@ dynamic_sub_text = f"↑ ({' | '.join(formatted_texts)})" if formatted_texts els
 
 title_col, summary_col = st.columns([7, 5])
 with title_col:
-    # 💡 [개발용 최신 메인 제목 반영]
     st.title("📦 스마트 물류 출고 통합 대시보드")
     main_max_str = df['결제일시_dt'].max().strftime('%y-%m-%d %H:%M') if '결제일시_dt' in df.columns and not df['결제일시_dt'].isna().all() else "미확인"
     st.caption(f"📅 **출고예정일 : {formatted_target_date}** &nbsp;|&nbsp; ⏱️ 데이터 생성일시 : {main_max_str}")
@@ -321,7 +315,7 @@ with summary_col:
 st.markdown("---")
 
 # ==============================================================================
-# 💡 [개발용 최신 UX 반영] 메인 요약 영역 접기/펴기 (st.expander)
+# 💡 [UI 개선] 메인 요약 영역 접기/펴기 아코디언 적용
 # ==============================================================================
 with st.expander("📊 세부 출고 및 패킹 현황 요약 (클릭하여 접기/펴기)", expanded=True):
     left_header_col, right_header_col = st.columns([6, 6])
@@ -483,7 +477,7 @@ with st.expander("📊 세부 출고 및 패킹 현황 요약 (클릭하여 접�
 st.markdown("---")
 
 # ==============================================================================
-# 9. [D구역] 개발용 최신 메뉴 라우터 (5번 메뉴 연결 포함)
+# 9. [D구역] 메뉴 라우터
 # ==============================================================================
 if selected_menu == "🚚 1. 배송 유형별 마감 예측":
     st.info("🚧 **[개발 중]** 현장 상황에 맞춘 최적의 마감 예측 알고리즘을 설계하고 있습니다. 다음 업데이트를 기대해 주세요!", icon="🛠️")
@@ -496,7 +490,7 @@ elif selected_menu == "📦 3. 상품별 출고 현황":
     try:
         render_products_tab(group_type)
     except NameError:
-        st.error("❌ `render_products_tab` 모듈을 찾을 수 없습니다. `Views/tab3_products.py` 파일의 존재 여부를 확인해 주세요.")
+        st.error("❌ `render_products_tab` 모듈을 찾을 수 없습니다.")
 elif selected_menu == "⏱️ 4. 시간대별 주문 인입 분석":
     try:
         render_time_inflow_tab(group_type)
