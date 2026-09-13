@@ -2,49 +2,12 @@ import os
 import sys
 import pandas as pd
 import streamlit as st
-import traceback
 
-# ==============================================================================
-# 0. [보안] 배포용 사내 및 외부 허가 인원 지정 (구글 로그인 화이트리스트)
-# ==============================================================================
-ALLOWED_EMAILS = [
-    "pmy@buksan.pro",  # 👈 테스트 사용자 및 사용 허가 이메일 입력
-    "dlee@hanjin.com"
-    # 추가로 허용할 이메일을 여기에 계속 작성하세요.
-]
-
-# 1) 미로그인 상태 처리
-if not st.user.is_logged_in:
-    st.set_page_config(page_title="로그인 필요 | 스마트 물류 출고 대시보드", page_icon="🔒")
-    st.title("🔒 지정 사용자 전용 시스템 접속")
-    st.subheader("스마트 물류 출고 통합 대시보드")
-    st.info("본 시스템은 사전 등록된 허가 인원만 이용 가능합니다. 구글 계정으로 로그인해 주세요.")
-    
-    if st.button("🔑 Google 계정으로 로그인", type="primary"):
-        st.login("google")
-    st.stop()
-
-# 2) 허가되지 않은 이메일 차단 처리
-user_email = str(st.user.email).strip().lower()
-allowed_emails_lower = [email.strip().lower() for email in ALLOWED_EMAILS]
-
-if user_email not in allowed_emails_lower:
-    st.set_page_config(page_title="접근 제한 | 스마트 물류 출고 대시보드", page_icon="🚫")
-    st.error(f"🚫 접근 권한이 없습니다. ({user_email})")
-    st.warning("등록되지 않은 계정입니다. 시스템 관리자에게 권한 요청 후 다시 시도해 주세요.")
-    
-    if st.button("다른 계정으로 로그인"):
-        st.logout()
-    st.stop()
-
-
-# ==============================================================================
-# 1. 작업 경로 등록 및 모듈 경로 설정
-# ==============================================================================
+# --- 1. 작업 경로 등록 및 모듈 경로 설정 ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 
-view_dir_upper = os.path.join(BASE_DIR, "Views")
+view_dir_upper = os.path.join(BASE_DIR, "View")
 view_dir_lower = os.path.join(BASE_DIR, "views")
 
 if os.path.exists(view_dir_upper):
@@ -52,7 +15,7 @@ if os.path.exists(view_dir_upper):
 elif os.path.exists(view_dir_lower):
     sys.path.append(view_dir_lower)
 
-# 💡 탭 모듈 불러오기
+# 💡 모듈 불러오기
 try:
     from tab1_dispatch import render_dispatch_tab
     from tab2_sellers import render_sellers_tab
@@ -61,25 +24,15 @@ try:
     from tab5_combinations import render_combinations_tab  
 except ModuleNotFoundError:
     try:
-        from Views.tab1_dispatch import render_dispatch_tab
-        from Views.tab2_sellers import render_sellers_tab
-        from Views.tab3_products import render_products_tab
-        from Views.tab4_time_inflow import render_time_inflow_tab  
-        from Views.tab5_combinations import render_combinations_tab  
+        from views.tab1_dispatch import render_dispatch_tab
+        from views.tab2_sellers import render_sellers_tab
+        from views.tab3_products import render_products_tab
+        from views.tab4_time_inflow import render_time_inflow_tab  
+        from views.tab5_combinations import render_combinations_tab  
     except ModuleNotFoundError:
-        try:
-            from views.tab1_dispatch import render_dispatch_tab
-            from views.tab2_sellers import render_sellers_tab
-            from views.tab3_products import render_products_tab
-            from views.tab4_time_inflow import render_time_inflow_tab  
-            from views.tab5_combinations import render_combinations_tab  
-        except Exception as e:
-            st.error(f"🚨 Views 폴더 내 모듈 로드 중 에러 발생: {e}")
-            st.code(traceback.format_exc())
+        pass 
 
-# ==============================================================================
-# 2. 상수 정의
-# ==============================================================================
+# --- 2. 상수 정의 (컬럼 다이어트 및 SKU 세팅) ---
 DELIVERY_TYPES = ['일반 배송', '당일 배송', '휴일 배송']
 PACKING_TYPES = ['단수', '단수단포', '단수합포', '이종합포', '혼합']
 
@@ -91,14 +44,12 @@ REQUIRED_COLUMNS = [
 
 DRY_ICE_SKUS = ['40574128111']
 
-# ==============================================================================
-# 3. 페이지 기본 설정 및 여백 최적화 CSS
-# ==============================================================================
+# --- 3. 페이지 기본 설정 및 여백 최적화 ---
 st.set_page_config(page_title="스마트 물류 출고 대시보드", layout="wide")
 
 st.markdown("""
     <style>
-    /* 상단 패딩 조절 (짤림 방지) */
+    /* 상단 패딩 안전값 조절 (짤림 방지 및 스크롤 최적화) */
     .block-container {
         padding-top: 3.0rem !important;
         padding-bottom: 1rem !important;
@@ -119,14 +70,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.sidebar.caption(f"👤 접속 계정: {st.user.email}")
-if st.sidebar.button("🚪 로그아웃", key="logout_btn"):
-    st.logout()
-st.sidebar.markdown("---")
-
-# ==============================================================================
-# 4. 사이드바 메뉴 및 파일 업로드
-# ==============================================================================
+# --- 4. 사이드바: 메뉴 라우팅 & 파일 업로드 ---
 st.sidebar.markdown("""
     <style>
     div[data-testid="stRadio"] label p {
@@ -168,21 +112,22 @@ if uploaded_file is None:
     st.info("👈 좌측 사이드바에서 분석할 **당일 출고현황 파일(.xlsx)**을 업로드해 주세요.")
     st.stop()
 
+# =====================================================================
+# 🚨 [방어막 1] 파일 로드 전 필수 컬럼 검증
+# =====================================================================
 try:
     df_preview = pd.read_excel(uploaded_file, nrows=0) 
     uploaded_cols = df_preview.columns.tolist()
     missing_cols = [col for col in REQUIRED_COLUMNS if col not in uploaded_cols]
     
     if missing_cols:
-        st.sidebar.error(f"❌ 업로드하신 파일에 필수 컬럼이 누락되었습니다.\n\n**[부족한 컬럼]**\n{', '.join(missing_cols)}")
+        st.sidebar.error(f"❌ 업로드하신 파일에 필수 컬럼이 누락되어 작업을 진행할 수 없습니다.\n\n**[부족한 컬럼]**\n{', '.join(missing_cols)}")
         st.stop()
 except Exception as e:
     st.sidebar.error("파일을 읽는 중 문제가 발생했습니다. 엑셀 형식을 확인해 주세요.")
     st.stop()
 
-# ==============================================================================
-# 5. 핵심 데이터 병합 및 정제 (정확한 수치 산출 로직)
-# ==============================================================================
+# --- 5. 데이터 로드 및 전처리 핵심 로직 ---
 @st.cache_data(show_spinner="데이터 다이어트 및 병합 분석 중...")
 def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
     df_main = pd.read_excel(main_file, usecols=REQUIRED_COLUMNS, dtype={'출고번호': str, '기준재고번호': str})
@@ -190,7 +135,6 @@ def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
     if opt_prev_file is not None:
         if '출고예정일' in df_main.columns:
             target_date_str = str(df_main['출고예정일'].mode()[0])
-            # 💡 [핵심] 당일 03:00 이전에 처리된 전일자 건들은 병합하지 않고 삭제합니다.
             cutoff_time = pd.to_datetime(target_date_str) + pd.Timedelta(hours=3)
             
             try:
@@ -201,7 +145,6 @@ def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
                 df_prev_filtered = df_prev[keep_mask].drop(columns=['출고일자_dt'])
                 
                 df_main = pd.concat([df_main, df_prev_filtered], ignore_index=True)
-                # 💡 [핵심] 출고번호와 상품명(SKU)을 동시에 기준으로 중복을 완벽히 제거합니다.
                 df_main = df_main.drop_duplicates(subset=['출고번호', '기준재고번호'], keep='last')
                 
             except ValueError:
@@ -258,9 +201,7 @@ except Exception as e:
     st.error(f"❌ 데이터 분석 중 오류가 발생했습니다: {e}")
     st.stop()
 
-# ==============================================================================
-# 6. 전처리 및 대시보드 상단 요약
-# ==============================================================================
+# --- 6. 데이터 전처리 및 출고예정일 검증 값 추출 ---
 def map_delivery_type(val):
     val_str = str(val).replace(" ", "")
     if '당일' in val_str:
@@ -276,7 +217,7 @@ df['배송대분류'] = df['배송유형'].apply(map_delivery_type)
 total_inflow = df['출고번호'].nunique()
 type_counts = df.groupby('배송대분류')['출고번호'].nunique().to_dict()
 
-# 출고 예정일자 파싱
+# 💡 출고 예정일자 검증 값 추출
 if '출고예정일' in df.columns and not df['출고예정일'].isna().all():
     target_date_val = str(df['출고예정일'].mode()[0])
     if len(target_date_val) == 8 and target_date_val.isdigit():
@@ -286,6 +227,7 @@ if '출고예정일' in df.columns and not df['출고예정일'].isna().all():
 else:
     formatted_target_date = "미확인"
 
+# --- [A구역]: 타이틀 및 메인 서브 현황 ---
 active_types = {k: v for k, v in type_counts.items() if v > 0}
 sorted_types = sorted(active_types.items(), key=lambda item: item[1], reverse=True)
 formatted_texts = [f"{k.replace(' 배송', '')} {v:,}건" for k, v in sorted_types]
@@ -314,9 +256,9 @@ with summary_col:
 
 st.markdown("---")
 
-# ==============================================================================
-# 💡 [UI 개선] 메인 요약 영역 접기/펴기 아코디언 적용
-# ==============================================================================
+# =====================================================================
+# 💡 메인 요약 영역 접기/펴기 (st.expander) 적용
+# =====================================================================
 with st.expander("📊 세부 출고 및 패킹 현황 요약 (클릭하여 접기/펴기)", expanded=True):
     left_header_col, right_header_col = st.columns([6, 6])
 
@@ -476,9 +418,7 @@ with st.expander("📊 세부 출고 및 패킹 현황 요약 (클릭하여 접�
 
 st.markdown("---")
 
-# ==============================================================================
-# 9. [D구역] 메뉴 라우터
-# ==============================================================================
+# --- 9. [D구역] 메뉴 라우터 ---
 if selected_menu == "🚚 1. 배송 유형별 마감 예측":
     st.info("🚧 **[개발 중]** 현장 상황에 맞춘 최적의 마감 예측 알고리즘을 설계하고 있습니다. 다음 업데이트를 기대해 주세요!", icon="🛠️")
 elif selected_menu == "🏢 2. 셀러별 상세 현황":
