@@ -3,7 +3,47 @@ import sys
 import pandas as pd
 import streamlit as st
 
+# ==============================================================================
+# 0. [보안 및 권한 제어] Streamlit Secrets 연동 구글 로그인
+# ==============================================================================
+# 1) 로그인하지 않은 사용자는 여기서 차단하고 로그인 버튼만 보여줍니다.
+if not st.user.is_logged_in:
+    st.set_page_config(page_title="로그인 필요 | 스마트 물류 출고 대시보드", page_icon="🔒")
+    st.title("🔒 지정 사용자 전용 시스템 접속")
+    st.subheader("스마트 물류 출고 통합 대시보드")
+    st.info("본 시스템은 사전 등록된 허가 인원만 이용 가능합니다. 구글 계정으로 로그인해 주세요.")
+    
+    if st.button("🔑 Google 계정으로 로그인", type="primary"):
+        st.login("google")
+    st.stop()
+
+# 2) 서버(Secrets)에 등록된 권한 명단 불러오기
+user_email = str(st.user.email).strip().lower()
+
+try:
+    admin_emails = [e.lower() for e in st.secrets["roles"]["admins"]]
+    guest_emails = [e.lower() for e in st.secrets["roles"]["guests"]]
+except Exception:
+    admin_emails = []
+    guest_emails = []
+
+# 3) 로그인한 사람의 권한 판별 및 미등록자 차단
+if user_email in admin_emails:
+    current_user_role = "admin"
+elif user_email in guest_emails:
+    current_user_role = "guest"
+else:
+    # 명단에 없으면 쫓아냅니다.
+    st.set_page_config(page_title="접근 제한 | 스마트 물류 출고 대시보드", page_icon="🚫")
+    st.error(f"🚫 접근 권한이 없습니다. ({user_email})")
+    st.warning("등록되지 않은 계정입니다. 시스템 관리자에게 권한 요청 후 다시 시도해 주세요.")
+    if st.button("다른 계정으로 로그인"):
+        st.logout()
+    st.stop()
+
+# ==============================================================================
 # --- 1. 작업 경로 등록 및 모듈 경로 설정 ---
+# ==============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 
@@ -32,7 +72,9 @@ except ModuleNotFoundError:
     except ModuleNotFoundError:
         pass 
 
+# ==============================================================================
 # --- 2. 상수 정의 (컬럼 다이어트 및 SKU 세팅) ---
+# ==============================================================================
 DELIVERY_TYPES = ['일반 배송', '당일 배송', '휴일 배송']
 PACKING_TYPES = ['단수', '단수단포', '단수합포', '이종합포', '혼합']
 
@@ -44,7 +86,9 @@ REQUIRED_COLUMNS = [
 
 DRY_ICE_SKUS = ['40574128111']
 
+# ==============================================================================
 # --- 3. 페이지 기본 설정 및 여백 최적화 ---
+# ==============================================================================
 st.set_page_config(page_title="스마트 물류 출고 대시보드", layout="wide")
 
 st.markdown("""
@@ -70,7 +114,15 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 4. 사이드바: 메뉴 라우팅 & 파일 업로드 ---
+# 💡 접속자 이메일 표시 및 로그아웃 버튼 (배포용 추가 기능)
+st.sidebar.caption(f"👤 접속 계정: {st.user.email}")
+if st.sidebar.button("🚪 로그아웃", key="logout_btn"):
+    st.logout()
+st.sidebar.markdown("---")
+
+# ==============================================================================
+# --- 4. 사이드바: 권한별 메뉴 라우팅 & 파일 업로드 ---
+# ==============================================================================
 st.sidebar.markdown("""
     <style>
     div[data-testid="stRadio"] label p {
@@ -82,15 +134,22 @@ st.sidebar.markdown("""
 """, unsafe_allow_html=True)
 
 st.sidebar.header("📌 분석 메뉴 선택")
+
+# 💡 [핵심] 권한(admin/guest)에 따라 메뉴를 다르게 보여줍니다!
+menu_options = [
+    "🚚 1. 배송 유형별 마감 예측", 
+    "🏢 2. 셀러별 상세 현황",
+    "📦 3. 상품별 출고 현황",
+    "⏱️ 4. 시간대별 주문 인입 분석"
+]
+
+# 관리자(admin)일 때만 5번 이종합포 메뉴를 메뉴판에 몰래 추가합니다.
+if current_user_role == "admin":
+    menu_options.append("🔗 5. 이종합포 묶음 할당")
+
 selected_menu = st.sidebar.radio(
     "원하시는 메뉴를 선택하세요:",
-    [
-        "🚚 1. 배송 유형별 마감 예측", 
-        "🏢 2. 셀러별 상세 현황",
-        "📦 3. 상품별 출고 현황",
-        "⏱️ 4. 시간대별 주문 인입 분석",
-        "🔗 5. 이종합포 묶음 할당"
-    ]
+    menu_options
 )
 
 st.sidebar.markdown("---")
@@ -127,7 +186,9 @@ except Exception as e:
     st.sidebar.error("파일을 읽는 중 문제가 발생했습니다. 엑셀 형식을 확인해 주세요.")
     st.stop()
 
-# --- 5. 데이터 로드 및 전처리 핵심 로직 ---
+# ==============================================================================
+# --- 5. 데이터 로드 및 전처리 핵심 로직 (원본 로직 완벽 유지) ---
+# ==============================================================================
 @st.cache_data(show_spinner="데이터 다이어트 및 병합 분석 중...")
 def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
     df_main = pd.read_excel(main_file, usecols=REQUIRED_COLUMNS, dtype={'출고번호': str, '기준재고번호': str})
@@ -201,7 +262,9 @@ except Exception as e:
     st.error(f"❌ 데이터 분석 중 오류가 발생했습니다: {e}")
     st.stop()
 
-# --- 6. 데이터 전처리 및 출고예정일 검증 값 추출 ---
+# ==============================================================================
+# --- 6. 데이터 전처리 및 출고예정일 검증 값 추출 (원본 로직 완벽 유지) ---
+# ==============================================================================
 def map_delivery_type(val):
     val_str = str(val).replace(" ", "")
     if '당일' in val_str:
@@ -227,7 +290,9 @@ if '출고예정일' in df.columns and not df['출고예정일'].isna().all():
 else:
     formatted_target_date = "미확인"
 
+# ==============================================================================
 # --- [A구역]: 타이틀 및 메인 서브 현황 ---
+# ==============================================================================
 active_types = {k: v for k, v in type_counts.items() if v > 0}
 sorted_types = sorted(active_types.items(), key=lambda item: item[1], reverse=True)
 formatted_texts = [f"{k.replace(' 배송', '')} {v:,}건" for k, v in sorted_types]
@@ -418,7 +483,9 @@ with st.expander("📊 세부 출고 및 패킹 현황 요약 (클릭하여 접�
 
 st.markdown("---")
 
+# ==============================================================================
 # --- 9. [D구역] 메뉴 라우터 ---
+# ==============================================================================
 if selected_menu == "🚚 1. 배송 유형별 마감 예측":
     st.info("🚧 **[개발 중]** 현장 상황에 맞춘 최적의 마감 예측 알고리즘을 설계하고 있습니다. 다음 업데이트를 기대해 주세요!", icon="🛠️")
 elif selected_menu == "🏢 2. 셀러별 상세 현황":
