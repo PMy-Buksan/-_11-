@@ -18,8 +18,9 @@ if st.session_state.user_id is None:
     st.info("부여받은 개별 아이디와 비밀번호로 로그인해 주세요.")
     
     with st.form("login_form"):
-        input_id = st.text_input("👤 아이디 (ID)").strip()
-        input_pw = st.text_input("🔑 비밀번호 (Password)", type="password").strip()
+        # autocomplete="username" 과 "current-password" 속성을 추가합니다!
+        input_id = st.text_input("👤 아이디 (ID)", autocomplete="username").strip()
+        input_pw = st.text_input("🔑 비밀번호 (Password)", type="password", autocomplete="current-password").strip()
         submit_btn = st.form_submit_button("로그인")
         
         if submit_btn:
