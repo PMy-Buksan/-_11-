@@ -9,11 +9,11 @@ import traceback
 # 0. [보안 및 권한 제어] 개별 ID/PW 기반 인증 시스템
 # ==============================================================================
 if "user_id" not in st.session_state:
+    st.set_page_config(page_title="로그인 | 스마트 물류 출고 대시보드", page_icon="🔒")
     st.session_state.user_id = None
     st.session_state.user_role = None
 
 if st.session_state.user_id is None:
-    st.set_page_config(page_title="로그인 | 스마트 물류 출고 대시보드", page_icon="🔒")
     st.title("🔒 물류 출고 현황 분석기")
     st.info("부여받은 개별 아이디와 비밀번호로 로그인해 주세요.")
     
@@ -25,10 +25,9 @@ if st.session_state.user_id is None:
         if submit_btn:
             try:
                 users_db = st.secrets["users"]
-                # 입력한 ID가 서버 DB에 있고, 비밀번호가 일치하면 통과!
                 if input_id in users_db and str(users_db[input_id]["password"]) == input_pw:
                     st.session_state.user_id = input_id
-                    st.session_state.user_role = users_db[input_id]["role"]
+                    st.session_state.user_role = str(users_db[input_id]["role"])
                     st.rerun()
                 else:
                     st.error("🚫 아이디 또는 비밀번호가 일치하지 않습니다.")
@@ -40,7 +39,7 @@ current_user_id = st.session_state.user_id
 current_user_role = st.session_state.user_role
 
 # ==============================================================================
-# 0-1. [메뉴 권한 동적 관리] 역할(Role)별 메뉴 제어 설정 불러오기
+# 0-1. [메뉴 권한 동적 관리] 역할(Role)별 메뉴 제어 설정
 # ==============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "menu_config.json")
@@ -53,6 +52,16 @@ ALL_MENUS = [
     "🔗 5. 이종합포 묶음 할당"
 ]
 
+# 💡 [핵심 업데이트] Secrets에 적힌 모든 권한(role) 이름을 자동으로 수집합니다!
+unique_roles = set(["admin"])
+try:
+    for uid, info in st.secrets["users"].items():
+        if "role" in info:
+            unique_roles.add(str(info["role"]))
+except Exception:
+    pass
+unique_roles = sorted(list(unique_roles))
+
 def load_menu_config():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -61,11 +70,10 @@ def load_menu_config():
 
 menu_config = load_menu_config()
 
-# 초기 설정이 없을 경우 기본값 세팅
-if "admin" not in menu_config:
-    menu_config["admin"] = ALL_MENUS
-if "guest" not in menu_config:
-    menu_config["guest"] = ALL_MENUS[:4]  # 게스트는 1~4번만 보이게
+# 발견된 새로운 권한(예: 북산_현장)이 설정 파일에 없다면 기본적으로 1~4번 메뉴만 허용해 둡니다.
+for r in unique_roles:
+    if r not in menu_config:
+        menu_config[r] = ALL_MENUS if r == "admin" else ALL_MENUS[:4]
 
 # ==============================================================================
 # --- 1. 작업 경로 등록 및 모듈 경로 설정 ---
@@ -113,8 +121,6 @@ DRY_ICE_SKUS = ['40574128111']
 # ==============================================================================
 # --- 3. 페이지 기본 설정 및 여백 최적화 ---
 # ==============================================================================
-st.set_page_config(page_title="스마트 물류 출고 대시보드", layout="wide")
-
 st.markdown("""
     <style>
     .block-container {
@@ -131,8 +137,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 💡 로그인한 아이디와 권한 표시!
-st.sidebar.caption(f"👤 접속 계정: {current_user_id} ({current_user_role.upper()})")
+st.sidebar.caption(f"👤 접속 계정: {current_user_id} ({current_user_role})")
 if st.sidebar.button("🚪 로그아웃", key="logout_btn"):
     st.session_state.user_id = None
     st.session_state.user_role = None
@@ -155,11 +160,10 @@ st.sidebar.markdown("""
 st.sidebar.header("📌 분석 메뉴 선택")
 
 menu_options = []
-# 관리자에게만 권한 제어판 노출
+# 최고 관리자(admin)에게만 권한 제어판 노출
 if current_user_role == "admin":
     menu_options.append("⚙️ 0. 권한별 메뉴 제어판")
 
-# 역할(admin/guest)에 허락된 메뉴만 사이드바에 표시
 allowed_menus = menu_config.get(current_user_role, [])
 for m in ALL_MENUS:
     if m in allowed_menus:
@@ -177,7 +181,6 @@ with st.sidebar.expander("▶️ 선택 파일 업로드", expanded=False):
     prev_file = st.file_uploader("1. 전일 미출고 실적 (선택)", type=["xlsx", "xls"], key="prev_file")
     shortage_file = st.file_uploader("2. 재고부족 리스트 (선택)", type=["xlsx", "xls"], key="short_file")
 
-# 관리자 제어판 화면일 때는 데이터 업로드 경고창 무시
 if selected_menu != "⚙️ 0. 권한별 메뉴 제어판":
     if uploaded_file is None:
         st.info("👈 좌측 사이드바에서 분석할 **당일 출고현황 파일(.xlsx)**을 업로드해 주세요.")
@@ -261,15 +264,16 @@ def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
 
 
 # ==============================================================================
-# --- 9. [D구역] 메뉴 라우터 (관리자 페이지 추가) ---
+# --- 9. [D구역] 메뉴 라우터 (관리자 제어판 업데이트) ---
 # ==============================================================================
 if selected_menu == "⚙️ 0. 권한별 메뉴 제어판":
     st.title("⚙️ 권한별 메뉴 접근 제어판")
-    st.info("아래 표에서 '관리자'와 '외부인'에게 노출할 메뉴를 각각 체크(☑️)한 뒤 [저장] 버튼을 누르세요.")
+    st.info("아래 표에서 각 권한(Role) 그룹에게 노출할 메뉴를 체크(☑️)한 뒤 [저장] 버튼을 누르세요.")
     
     records = []
-    for role in ["admin", "guest"]:
-        record = {"접속 역할(Role)": "최고 관리자 (Admin)" if role == "admin" else "외부 파트너 (Guest)", "_role_key": role}
+    # 💡 [핵심] 이제 하드코딩 없이 unique_roles(북산_현장 등)에 있는 모든 권한을 표로 그려줍니다!
+    for role in unique_roles:
+        record = {"접속 역할 (Role)": role, "_role_key": role}
         role_menus = menu_config.get(role, [])
         for m in ALL_MENUS:
             record[m] = (m in role_menus)
@@ -277,8 +281,7 @@ if selected_menu == "⚙️ 0. 권한별 메뉴 제어판":
         
     df_roles = pd.DataFrame(records)
     
-    st.markdown("##### 👥 권한별 메뉴 노출 설정")
-    # 화면에서 바로 수정 가능한 표 생성
+    st.markdown("##### 👥 권한 그룹별 사이드바 메뉴 노출 설정")
     edited_df = st.data_editor(
         df_roles.drop(columns=["_role_key"]), 
         hide_index=True, 
@@ -297,7 +300,6 @@ if selected_menu == "⚙️ 0. 권한별 메뉴 제어판":
         
         st.success("✅ 메뉴 노출 설정이 성공적으로 저장되었습니다! 새로고침(F5)을 누르면 즉시 사이드바에 반영됩니다.")
 
-# 분석 메뉴일 때만 데이터를 로드하고 화면을 그림
 elif selected_menu != "⚙️ 0. 권한별 메뉴 제어판":
     try:
         df = load_and_preprocess(uploaded_file, prev_file, shortage_file)
@@ -464,7 +466,6 @@ elif selected_menu != "⚙️ 0. 권한별 메뉴 제어판":
 
     st.markdown("---")
 
-    # 메뉴 라우터 처리
     if selected_menu == "🚚 1. 배송 유형별 마감 예측":
         st.info("🚧 **[개발 중]** 현장 상황에 맞춘 최적의 마감 예측 알고리즘을 설계하고 있습니다.")
     elif selected_menu == "🏢 2. 셀러별 상세 현황":
