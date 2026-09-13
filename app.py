@@ -6,41 +6,41 @@ import streamlit as st
 import traceback
 
 # ==============================================================================
-# 0. [보안 및 권한 제어] Streamlit Secrets 연동 구글 로그인
+# 0. [보안 및 권한 제어] 개별 ID/PW 기반 인증 시스템
 # ==============================================================================
-if not st.user.is_logged_in:
-    st.set_page_config(page_title="로그인 필요 | 스마트 물류 출고 대시보드", page_icon="🔒")
-    st.title("🔒 지정 사용자 전용 시스템 접속")
-    st.subheader("스마트 물류 출고 통합 대시보드")
-    st.info("본 시스템은 사전 등록된 허가 인원만 이용 가능합니다. 구글 계정으로 로그인해 주세요.")
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
+    st.session_state.user_role = None
+
+if st.session_state.user_id is None:
+    st.set_page_config(page_title="로그인 | 스마트 물류 출고 대시보드", page_icon="🔒")
+    st.title("🔒 물류 출고 현황 분석기")
+    st.info("부여받은 개별 아이디와 비밀번호로 로그인해 주세요.")
     
-    if st.button("🔑 Google 계정으로 로그인", type="primary"):
-        st.login("google")
+    with st.form("login_form"):
+        input_id = st.text_input("👤 아이디 (ID)").strip()
+        input_pw = st.text_input("🔑 비밀번호 (Password)", type="password").strip()
+        submit_btn = st.form_submit_button("로그인")
+        
+        if submit_btn:
+            try:
+                users_db = st.secrets["users"]
+                # 입력한 ID가 서버 DB에 있고, 비밀번호가 일치하면 통과!
+                if input_id in users_db and str(users_db[input_id]["password"]) == input_pw:
+                    st.session_state.user_id = input_id
+                    st.session_state.user_role = users_db[input_id]["role"]
+                    st.rerun()
+                else:
+                    st.error("🚫 아이디 또는 비밀번호가 일치하지 않습니다.")
+            except KeyError:
+                st.error("🚨 서버 설정(Secrets)에 [users] 계정 정보가 등록되지 않았습니다.")
     st.stop()
 
-user_email = str(st.user.email).strip().lower()
-
-try:
-    admin_emails = [e.lower() for e in st.secrets["roles"]["admins"]]
-    guest_emails = [e.lower() for e in st.secrets["roles"]["guests"]]
-except Exception:
-    admin_emails = []
-    guest_emails = []
-
-if user_email in admin_emails:
-    current_user_role = "admin"
-elif user_email in guest_emails:
-    current_user_role = "guest"
-else:
-    st.set_page_config(page_title="접근 제한 | 스마트 물류 출고 대시보드", page_icon="🚫")
-    st.error(f"🚫 접근 권한이 없습니다. ({user_email})")
-    st.warning("등록되지 않은 계정입니다. 시스템 관리자에게 권한 요청 후 다시 시도해 주세요.")
-    if st.button("다른 계정으로 로그인"):
-        st.logout()
-    st.stop()
+current_user_id = st.session_state.user_id
+current_user_role = st.session_state.user_role
 
 # ==============================================================================
-# 0-1. [메뉴 권한 동적 관리] 계정별 메뉴 제어 설정 불러오기
+# 0-1. [메뉴 권한 동적 관리] 역할(Role)별 메뉴 제어 설정 불러오기
 # ==============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "menu_config.json")
@@ -61,14 +61,11 @@ def load_menu_config():
 
 menu_config = load_menu_config()
 
-# Secrets에 등록된 명단과 JSON 설정을 동기화 (새로운 사람이 추가된 경우 기본값 부여)
-for email in admin_emails:
-    if email not in menu_config:
-        menu_config[email] = ALL_MENUS  # 관리자는 기본적으로 모든 메뉴 허용
-
-for email in guest_emails:
-    if email not in menu_config:
-        menu_config[email] = ALL_MENUS[:4]  # 게스트는 기본적으로 1~4번만 허용
+# 초기 설정이 없을 경우 기본값 세팅
+if "admin" not in menu_config:
+    menu_config["admin"] = ALL_MENUS
+if "guest" not in menu_config:
+    menu_config["guest"] = ALL_MENUS[:4]  # 게스트는 1~4번만 보이게
 
 # ==============================================================================
 # --- 1. 작업 경로 등록 및 모듈 경로 설정 ---
@@ -91,11 +88,11 @@ try:
     from tab5_combinations import render_combinations_tab  
 except ModuleNotFoundError:
     try:
-        from views.tab1_dispatch import render_dispatch_tab
-        from views.tab2_sellers import render_sellers_tab
-        from views.tab3_products import render_products_tab
-        from views.tab4_time_inflow import render_time_inflow_tab  
-        from views.tab5_combinations import render_combinations_tab  
+        from Views.tab1_dispatch import render_dispatch_tab
+        from Views.tab2_sellers import render_sellers_tab
+        from Views.tab3_products import render_products_tab
+        from Views.tab4_time_inflow import render_time_inflow_tab  
+        from Views.tab5_combinations import render_combinations_tab  
     except ModuleNotFoundError:
         pass 
 
@@ -134,9 +131,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.sidebar.caption(f"👤 접속 계정: {st.user.email} ({current_user_role})")
+# 💡 로그인한 아이디와 권한 표시!
+st.sidebar.caption(f"👤 접속 계정: {current_user_id} ({current_user_role.upper()})")
 if st.sidebar.button("🚪 로그아웃", key="logout_btn"):
-    st.logout()
+    st.session_state.user_id = None
+    st.session_state.user_role = None
+    st.rerun()
 st.sidebar.markdown("---")
 
 # ==============================================================================
@@ -155,12 +155,12 @@ st.sidebar.markdown("""
 st.sidebar.header("📌 분석 메뉴 선택")
 
 menu_options = []
-# 관리자에게만 제어판 메뉴 노출
+# 관리자에게만 권한 제어판 노출
 if current_user_role == "admin":
-    menu_options.append("⚙️ 0. 계정별 메뉴 제어 (관리자용)")
+    menu_options.append("⚙️ 0. 권한별 메뉴 제어판")
 
-# 현재 로그인한 사람이 볼 수 있도록 허락된 메뉴만 사이드바에 추가
-allowed_menus = menu_config.get(user_email, [])
+# 역할(admin/guest)에 허락된 메뉴만 사이드바에 표시
+allowed_menus = menu_config.get(current_user_role, [])
 for m in ALL_MENUS:
     if m in allowed_menus:
         menu_options.append(m)
@@ -177,8 +177,8 @@ with st.sidebar.expander("▶️ 선택 파일 업로드", expanded=False):
     prev_file = st.file_uploader("1. 전일 미출고 실적 (선택)", type=["xlsx", "xls"], key="prev_file")
     shortage_file = st.file_uploader("2. 재고부족 리스트 (선택)", type=["xlsx", "xls"], key="short_file")
 
-# 관리자 제어판 화면일 때는 데이터 업로드 경고창을 무시합니다.
-if selected_menu != "⚙️ 0. 계정별 메뉴 제어 (관리자용)":
+# 관리자 제어판 화면일 때는 데이터 업로드 경고창 무시
+if selected_menu != "⚙️ 0. 권한별 메뉴 제어판":
     if uploaded_file is None:
         st.info("👈 좌측 사이드바에서 분석할 **당일 출고현황 파일(.xlsx)**을 업로드해 주세요.")
         st.stop()
@@ -195,7 +195,7 @@ if selected_menu != "⚙️ 0. 계정별 메뉴 제어 (관리자용)":
         st.stop()
 
 # ==============================================================================
-# --- 5. 데이터 로드 및 전처리 (수정 없음) ---
+# --- 5. 데이터 로드 및 전처리 ---
 # ==============================================================================
 @st.cache_data(show_spinner="데이터 다이어트 및 병합 분석 중...")
 def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
@@ -205,17 +205,13 @@ def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
         if '출고예정일' in df_main.columns:
             target_date_str = str(df_main['출고예정일'].mode()[0])
             cutoff_time = pd.to_datetime(target_date_str) + pd.Timedelta(hours=3)
-            
             try:
                 df_prev = pd.read_excel(opt_prev_file, usecols=REQUIRED_COLUMNS, dtype={'출고번호': str, '기준재고번호': str})
                 df_prev['출고일자_dt'] = pd.to_datetime(df_prev['출고일자'], errors='coerce')
-                
                 keep_mask = df_prev['출고일자_dt'].isna() | (df_prev['출고일자_dt'] >= cutoff_time)
                 df_prev_filtered = df_prev[keep_mask].drop(columns=['출고일자_dt'])
-                
                 df_main = pd.concat([df_main, df_prev_filtered], ignore_index=True)
                 df_main = df_main.drop_duplicates(subset=['출고번호', '기준재고번호'], keep='last')
-                
             except ValueError:
                 st.sidebar.warning("⚠️ 전일 미출고 파일의 양식이 올바르지 않아 병합하지 못했습니다.")
         else:
@@ -239,7 +235,6 @@ def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
             df_short = pd.read_excel(opt_short_file, dtype=str)
             short_col = '출고번호' if '출고번호' in df_short.columns else df_short.columns[0]
             short_ids = set(df_short[short_col].dropna().astype(str).str.strip().unique())
-            
             cond = df_main['출고번호_clean'].isin(short_ids)
             if '할당상태' in df_main.columns:
                 df_main.loc[cond, '할당상태'] = '재고부족'
@@ -268,40 +263,42 @@ def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
 # ==============================================================================
 # --- 9. [D구역] 메뉴 라우터 (관리자 페이지 추가) ---
 # ==============================================================================
-if selected_menu == "⚙️ 0. 계정별 메뉴 제어 (관리자용)":
-    st.title("⚙️ 계정별 메뉴 접근 권한 제어판")
-    st.info("아래 표에서 각 사용자별로 노출할 메뉴를 체크(☑️)한 뒤 [저장] 버튼을 누르세요. (스마트폰에서도 조작 가능)")
+if selected_menu == "⚙️ 0. 권한별 메뉴 제어판":
+    st.title("⚙️ 권한별 메뉴 접근 제어판")
+    st.info("아래 표에서 '관리자'와 '외부인'에게 노출할 메뉴를 각각 체크(☑️)한 뒤 [저장] 버튼을 누르세요.")
     
-    # 설정 표 만들기
     records = []
-    all_registered_emails = admin_emails + guest_emails
-    
-    for email in all_registered_emails:
-        record = {"계정 (이메일)": email}
-        user_menus = menu_config.get(email, [])
+    for role in ["admin", "guest"]:
+        record = {"접속 역할(Role)": "최고 관리자 (Admin)" if role == "admin" else "외부 파트너 (Guest)", "_role_key": role}
+        role_menus = menu_config.get(role, [])
         for m in ALL_MENUS:
-            record[m] = (m in user_menus)
+            record[m] = (m in role_menus)
         records.append(record)
         
-    df_users = pd.DataFrame(records)
+    df_roles = pd.DataFrame(records)
     
-    st.markdown("##### 👥 사용자별 메뉴 노출 설정")
-    edited_df = st.data_editor(df_users, hide_index=True, use_container_width=True)
+    st.markdown("##### 👥 권한별 메뉴 노출 설정")
+    # 화면에서 바로 수정 가능한 표 생성
+    edited_df = st.data_editor(
+        df_roles.drop(columns=["_role_key"]), 
+        hide_index=True, 
+        use_container_width=True
+    )
     
-    if st.button("💾 변경된 권한 저장", type="primary"):
+    if st.button("💾 변경된 설정 저장", type="primary"):
         new_config = {}
-        for _, row in edited_df.iterrows():
-            email_val = row["계정 (이메일)"]
+        for idx, row in edited_df.iterrows():
+            role_key = df_roles.iloc[idx]["_role_key"]
             allowed = [m for m in ALL_MENUS if row[m] == True]
-            new_config[email_val] = allowed
+            new_config[role_key] = allowed
             
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(new_config, f, ensure_ascii=False, indent=4)
         
-        st.success("✅ 사용자 권한이 성공적으로 저장되었습니다! 새로고침(F5)을 누르면 즉시 사이드바에 반영됩니다.")
+        st.success("✅ 메뉴 노출 설정이 성공적으로 저장되었습니다! 새로고침(F5)을 누르면 즉시 사이드바에 반영됩니다.")
 
-# 관리자 메뉴가 아닌 실제 분석 메뉴일 때만 데이터를 로드하고 화면을 그립니다.
-elif selected_menu != "⚙️ 0. 계정별 메뉴 제어 (관리자용)":
+# 분석 메뉴일 때만 데이터를 로드하고 화면을 그림
+elif selected_menu != "⚙️ 0. 권한별 메뉴 제어판":
     try:
         df = load_and_preprocess(uploaded_file, prev_file, shortage_file)
     except Exception as e:
