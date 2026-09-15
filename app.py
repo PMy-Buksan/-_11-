@@ -5,6 +5,18 @@ import pandas as pd
 import streamlit as st
 import traceback
 
+# 💡 [초고속 엔진 설치 감지 로직 - 진짜 이름(python_calamine)으로 찾기 완벽 수정]
+HAS_CALAMINE = False
+try:
+    import python_calamine  # 파이썬 내부 진짜 모듈명
+    HAS_CALAMINE = True
+except ImportError:
+    try:
+        import calamine
+        HAS_CALAMINE = True
+    except ImportError:
+        HAS_CALAMINE = False
+
 # ==============================================================================
 # 0. [보안 및 권한 제어] 로컬(개발) vs 배포(서버) 자동 감지 프리패스 시스템
 # ==============================================================================
@@ -96,7 +108,7 @@ try:
     from tab3_products import render_products_tab
     from tab4_time_inflow import render_time_inflow_tab  
     from tab5_combinations import render_combinations_tab  
-    from tab6_data_download import render_download_tab   # 💡 추가됨!
+    from tab6_data_download import render_download_tab
 except ModuleNotFoundError:
     try:
         from Views.tab1_dispatch import render_dispatch_tab
@@ -104,12 +116,12 @@ except ModuleNotFoundError:
         from Views.tab3_products import render_products_tab
         from Views.tab4_time_inflow import render_time_inflow_tab  
         from Views.tab5_combinations import render_combinations_tab  
-        from Views.tab6_data_download import render_download_tab   # 💡 추가됨!
+        from Views.tab6_data_download import render_download_tab
     except ModuleNotFoundError:
         pass 
 
 # ==============================================================================
-# --- 2. 상수 정의 ---
+# --- 2. 상수 정의 및 ⚡ 초고속 엑셀 읽기 함수 ---
 # ==============================================================================
 DELIVERY_TYPES = ['일반 배송', '당일 배송', '휴일 배송']
 PACKING_TYPES = ['단수', '단수단포', '단수합포', '이종합포', '혼합']
@@ -119,6 +131,20 @@ REQUIRED_COLUMNS = [
     '출고예정일', '출고일자', '결제일시', '판매채널', '배송집하일'
 ]
 DRY_ICE_SKUS = ['40574128111']
+
+def read_excel_fast(file, **kwargs):
+    """
+    설치된 엔진을 감지하여 가장 빠른 속도로 엑셀을 읽어옵니다.
+    """
+    if HAS_CALAMINE:
+        try:
+            if hasattr(file, 'seek'): file.seek(0)
+            return pd.read_excel(file, engine='calamine', **kwargs)
+        except Exception:
+            pass 
+            
+    if hasattr(file, 'seek'): file.seek(0)
+    return pd.read_excel(file, **kwargs)
 
 # ==============================================================================
 # --- 3. 페이지 기본 설정 및 스타일 ---
@@ -175,26 +201,35 @@ with acc_col2:
         st.session_state.user_role = None
         st.rerun()
 
+# 💡 [엔진 상태 표시기] 설치가 잘 되었는지 여기서 바로 확인 가능합니다!
+if HAS_CALAMINE:
+    st.sidebar.markdown("<div style='font-size: 12px; color: #4CAF50; margin-top: 10px;'>⚡ 데이터 엔진: <b>초고속 모드</b> 작동 중</div>", unsafe_allow_html=True)
+else:
+    st.sidebar.markdown("<div style='font-size: 12px; color: #FF9800; margin-top: 10px;'>🐢 데이터 엔진: <b>일반 모드</b> (터미널 설치 재확인 필요)</div>", unsafe_allow_html=True)
+
+
 if selected_menu != ADMIN_MENU_NAME:
     if uploaded_file is None:
         st.info("👈 좌측 사이드바 상단에서 분석할 **당일 출고현황 파일(.xlsx)**을 업로드해 주세요.")
         st.stop()
     try:
-        df_preview = pd.read_excel(uploaded_file, nrows=0) 
+        # 미리보기는 단 0줄만 읽어서 필수 컬럼만 잽싸게 확인
+        df_preview = read_excel_fast(uploaded_file, nrows=0) 
         missing_cols = [col for col in REQUIRED_COLUMNS if col not in df_preview.columns.tolist()]
         if missing_cols:
             st.sidebar.error(f"❌ 필수 컬럼 누락: {', '.join(missing_cols)}")
             st.stop()
-    except Exception:
-        st.sidebar.error("파일을 읽는 중 문제가 발생했습니다.")
+    except Exception as e:
+        st.sidebar.error(f"파일을 읽는 중 문제가 발생했습니다. ({e})")
         st.stop()
 
 # ==============================================================================
 # --- 5. 데이터 로드 및 전처리 ---
 # ==============================================================================
-@st.cache_data(show_spinner="데이터 병합 및 태깅 분석 중...")
+@st.cache_data(show_spinner="데이터 추출 및 병합 가공 중... (최적화 엔진 가동)")
 def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
-    df_main = pd.read_excel(main_file, usecols=REQUIRED_COLUMNS, dtype={'출고번호': str, '기준재고번호': str})
+    # 💡 초고속 읽기 함수 + 필요한 컬럼 17개만 뽑아오는(usecols) 기술 결합!
+    df_main = read_excel_fast(main_file, usecols=REQUIRED_COLUMNS, dtype={'출고번호': str, '기준재고번호': str})
     df_main['데이터구분'] = '금일 신규'
     
     if opt_prev_file is not None:
@@ -202,7 +237,7 @@ def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
             target_date_str = str(df_main['출고예정일'].mode()[0])
             cutoff_time = pd.to_datetime(target_date_str) + pd.Timedelta(hours=3)
             try:
-                df_prev = pd.read_excel(opt_prev_file, usecols=REQUIRED_COLUMNS, dtype={'출고번호': str, '기준재고번호': str})
+                df_prev = read_excel_fast(opt_prev_file, usecols=REQUIRED_COLUMNS, dtype={'출고번호': str, '기준재고번호': str})
                 df_prev['출고일자_dt'] = pd.to_datetime(df_prev['출고일자'], errors='coerce')
                 keep_mask = df_prev['출고일자_dt'].isna() | (df_prev['출고일자_dt'] >= cutoff_time)
                 df_prev_filtered = df_prev[keep_mask].drop(columns=['출고일자_dt'])
@@ -228,7 +263,7 @@ def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
 
         if opt_short_file is not None:
             try:
-                df_short = pd.read_excel(opt_short_file, dtype=str)
+                df_short = read_excel_fast(opt_short_file, dtype=str)
                 short_col = '출고번호' if '출고번호' in df_short.columns else df_short.columns[0]
                 short_ids = set(df_short[short_col].dropna().astype(str).str.strip().unique())
                 
@@ -243,7 +278,14 @@ def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
                 cond_auto = (df_main['데이터구분'] == '금일 신규') & (df_main['할당상태'] == '미할당') & (df_main['결제일시_dt'] < threshold_time)
                 df_main.loc[cond_auto, '할당상태'] = '재고부족'
 
+        # 먼저 남은 미할당을 완전할당(미피킹)으로 변환합니다.
         df_main.loc[df_main['할당상태'] == '미할당', '할당상태'] = '완전할당(미피킹)'
+
+        # 💡 [핵심 버그 수정: 부분 할당 방지 로직]
+        # 같은 출고번호 내에 '재고부족'인 상품이 단 하나라도 있다면, 
+        # 해당 출고번호에 속한 '모든' 상품의 상태를 '재고부족'으로 강제 동기화시킵니다.
+        shortage_order_ids = df_main[df_main['할당상태'] == '재고부족']['출고번호'].dropna().unique()
+        df_main.loc[df_main['출고번호'].isin(shortage_order_ids), '할당상태'] = '재고부족'
 
     if '출고예정일' in df_main.columns and '결제일시_dt' in df_main.columns:
         df_main['출고예정일_dt'] = pd.to_datetime(df_main['출고예정일'], errors='coerce')
@@ -255,7 +297,6 @@ def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
             df_main[col] = df_main[col].astype('category')
 
     return df_main
-
 
 # ==============================================================================
 # --- 9. 메인 영역 & 메뉴 라우팅 ---
@@ -474,7 +515,6 @@ elif selected_menu != ADMIN_MENU_NAME:
 
     st.markdown("---")
 
-    # 메뉴 라우터 탭 연동
     if selected_menu == "출고 CAPA 분석":
         st.info("🚧 **[개발 중]** 현장 상황에 맞춘 최적의 마감 예측 알고리즘을 설계하고 있습니다.")
     elif selected_menu == "셀러별 출고 분석":
@@ -490,12 +530,9 @@ elif selected_menu != ADMIN_MENU_NAME:
         try: render_combinations_tab(df, selected_type) 
         except NameError: st.error("❌ `render_combinations_tab` 모듈을 찾을 수 없습니다.")
         except Exception as e: st.error(f"❌ 메뉴 실행 중 오류 발생: {e}")
-        
-    # 💡 [신규 모듈화 분리] 데이터 추출 및 다운로드 탭 연동
     elif selected_menu == "데이터 추출 및 다운로드":
         try: render_download_tab(df, df_prev, data_filter)
-        except NameError: st.error("❌ `render_download_tab` 모듈을 찾을 수 없습니다. (Views 폴더에 tab6_data_download.py 파일이 있는지 확인하세요!)")
+        except NameError: st.error("❌ `render_download_tab` 모듈을 찾을 수 없습니다.")
         except Exception as e: st.error(f"❌ 메뉴 실행 중 오류 발생: {e}")
 
-    # 스크롤 버그 방어막
     st.markdown("<div style='height: 100px;'></div>", unsafe_allow_html=True)
