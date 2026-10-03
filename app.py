@@ -5,10 +5,10 @@ import pandas as pd
 import streamlit as st
 import traceback
 
-# 💡 [초고속 엔진 설치 감지 로직 - 진짜 이름(python_calamine)으로 찾기 완벽 수정]
+# 💡 [초고속 엔진 설치 여부 자동 감지 로직]
 HAS_CALAMINE = False
 try:
-    import python_calamine  # 파이썬 내부 진짜 모듈명
+    import python_calamine  
     HAS_CALAMINE = True
 except ImportError:
     try:
@@ -18,7 +18,7 @@ except ImportError:
         HAS_CALAMINE = False
 
 # ==============================================================================
-# 0. [보안 및 권한 제어] 로컬(개발) vs 배포(서버) 자동 감지 프리패스 시스템
+# 0. [보안 및 권한 제어]
 # ==============================================================================
 if "user_id" not in st.session_state:
     st.session_state.user_id = None
@@ -57,11 +57,11 @@ current_user_id = st.session_state.user_id
 current_user_role = st.session_state.user_role
 
 # ==============================================================================
-# 0-1. [메뉴 권한 동적 관리]
+# 0-1. [메뉴 권한 고정 관리 (Hardcoding)] - 💡 리셋 방지 완벽 적용!
 # ==============================================================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(BASE_DIR, "menu_config.json")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) # 👈 (복구완료) 경로 설정용 필수 변수
 
+# 📌 [수정 포인트 1] 새로운 메뉴 탭이 개발되면 여기에 이름을 먼저 추가하세요!
 ALL_MENUS = [
     "출고 CAPA 분석", 
     "셀러별 출고 분석",
@@ -71,27 +71,30 @@ ALL_MENUS = [
     "데이터 추출 및 다운로드"
 ]
 
-unique_roles = set(["admin"])
-try:
-    for uid, info in st.secrets["users"].items():
-        if "role" in info:
-            unique_roles.add(str(info["role"]))
-except Exception:
-    pass
-unique_roles = sorted(list(unique_roles))
+# 📌 [수정 포인트 2] 각 역할(Role)별로 볼 수 있는 메뉴를 배정합니다.
+menu_config = {
+    "admin": [
+        "출고 CAPA 분석", "셀러별 출고 분석", "상품별 출고 분석", 
+        "시간대별 주문 분석", "이종합포 묶음 헬퍼", "데이터 추출 및 다운로드"
+    ],
+    "guest": [
+        "셀러별 출고 분석", "상품별 출고 분석", "시간대별 주문 분석"
+    ],
+    "북산_관리자": [
+        "출고 CAPA 분석", "셀러별 출고 분석", "상품별 출고 분석", 
+        "시간대별 주문 분석", "이종합포 묶음 헬퍼"
+    ],
+    "북산_현장": [
+        "셀러별 출고 분석", "상품별 출고 분석", "시간대별 주문 분석"
+    ]
+}
 
-def load_menu_config():
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-menu_config = load_menu_config()
-
-for r in unique_roles:
-    if r not in menu_config:
-        menu_config[r] = ALL_MENUS if r == "admin" else ALL_MENUS[:4]
-
+# 현재 접속한 사용자의 역할을 확인하고, 권한이 없으면 안전하게 guest 권한 부여
+if current_user_role not in menu_config:
+    allowed_menus = menu_config.get("guest", [])
+else:
+    allowed_menus = menu_config[current_user_role]
+    
 # ==============================================================================
 # --- 1. 작업 경로 등록 및 모듈 경로 설정 ---
 # ==============================================================================
@@ -121,7 +124,7 @@ except ModuleNotFoundError:
         pass 
 
 # ==============================================================================
-# --- 2. 상수 정의 및 ⚡ 초고속 엑셀 읽기 함수 ---
+# --- 2. 상수 정의 및 초고속 엑셀 읽기 함수 ---
 # ==============================================================================
 DELIVERY_TYPES = ['일반 배송', '당일 배송', '휴일 배송']
 PACKING_TYPES = ['단수', '단수단포', '단수합포', '이종합포', '혼합']
@@ -133,16 +136,12 @@ REQUIRED_COLUMNS = [
 DRY_ICE_SKUS = ['40574128111']
 
 def read_excel_fast(file, **kwargs):
-    """
-    설치된 엔진을 감지하여 가장 빠른 속도로 엑셀을 읽어옵니다.
-    """
     if HAS_CALAMINE:
         try:
             if hasattr(file, 'seek'): file.seek(0)
             return pd.read_excel(file, engine='calamine', **kwargs)
         except Exception:
             pass 
-            
     if hasattr(file, 'seek'): file.seek(0)
     return pd.read_excel(file, **kwargs)
 
@@ -201,19 +200,16 @@ with acc_col2:
         st.session_state.user_role = None
         st.rerun()
 
-# 💡 [엔진 상태 표시기] 설치가 잘 되었는지 여기서 바로 확인 가능합니다!
 if HAS_CALAMINE:
     st.sidebar.markdown("<div style='font-size: 12px; color: #4CAF50; margin-top: 10px;'>⚡ 데이터 엔진: <b>초고속 모드</b> 작동 중</div>", unsafe_allow_html=True)
 else:
-    st.sidebar.markdown("<div style='font-size: 12px; color: #FF9800; margin-top: 10px;'>🐢 데이터 엔진: <b>일반 모드</b> (터미널 설치 재확인 필요)</div>", unsafe_allow_html=True)
-
+    st.sidebar.markdown("<div style='font-size: 12px; color: #FF9800; margin-top: 10px;'>🐢 데이터 엔진: <b>일반 모드</b></div>", unsafe_allow_html=True)
 
 if selected_menu != ADMIN_MENU_NAME:
     if uploaded_file is None:
         st.info("👈 좌측 사이드바 상단에서 분석할 **당일 출고현황 파일(.xlsx)**을 업로드해 주세요.")
         st.stop()
     try:
-        # 미리보기는 단 0줄만 읽어서 필수 컬럼만 잽싸게 확인
         df_preview = read_excel_fast(uploaded_file, nrows=0) 
         missing_cols = [col for col in REQUIRED_COLUMNS if col not in df_preview.columns.tolist()]
         if missing_cols:
@@ -228,7 +224,6 @@ if selected_menu != ADMIN_MENU_NAME:
 # ==============================================================================
 @st.cache_data(show_spinner="데이터 추출 및 병합 가공 중... (최적화 엔진 가동)")
 def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
-    # 💡 초고속 읽기 함수 + 필요한 컬럼 17개만 뽑아오는(usecols) 기술 결합!
     df_main = read_excel_fast(main_file, usecols=REQUIRED_COLUMNS, dtype={'출고번호': str, '기준재고번호': str})
     df_main['데이터구분'] = '금일 신규'
     
@@ -278,12 +273,9 @@ def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
                 cond_auto = (df_main['데이터구분'] == '금일 신규') & (df_main['할당상태'] == '미할당') & (df_main['결제일시_dt'] < threshold_time)
                 df_main.loc[cond_auto, '할당상태'] = '재고부족'
 
-        # 먼저 남은 미할당을 완전할당(미피킹)으로 변환합니다.
         df_main.loc[df_main['할당상태'] == '미할당', '할당상태'] = '완전할당(미피킹)'
 
-        # 💡 [핵심 버그 수정: 부분 할당 방지 로직]
-        # 같은 출고번호 내에 '재고부족'인 상품이 단 하나라도 있다면, 
-        # 해당 출고번호에 속한 '모든' 상품의 상태를 '재고부족'으로 강제 동기화시킵니다.
+        # 💡 [버그 픽스] 부분 할당 방지 로직 (하나라도 부족하면 전체 출고번호 부족 처리)
         shortage_order_ids = df_main[df_main['할당상태'] == '재고부족']['출고번호'].dropna().unique()
         df_main.loc[df_main['출고번호'].isin(shortage_order_ids), '할당상태'] = '재고부족'
 
@@ -298,27 +290,23 @@ def load_and_preprocess(main_file, opt_prev_file, opt_short_file):
 
     return df_main
 
+
 # ==============================================================================
 # --- 9. 메인 영역 & 메뉴 라우팅 ---
 # ==============================================================================
 if selected_menu == ADMIN_MENU_NAME:
-    st.title("⚙️ 권한 제어 센터")
-    st.info("아래 표에서 각 권한(Role) 그룹에게 노출할 메뉴를 체크(☑️)한 뒤 [저장] 버튼을 누르세요.")
+    st.title("⚙️ 권한 제어 현황 (읽기 전용)")
+    st.info("💡 서버 초기화(리셋) 방지를 위해 권한은 코드에 영구 고정되었습니다. 권한 변경은 `app.py` 파일의 [0-1] 구역에서 코드를 직접 수정하세요.")
     
     records = []
-    for role in unique_roles:
-        record = {"접속 역할 (Role)": role, "_role_key": role}
-        role_menus = menu_config.get(role, [])
-        for m in ALL_MENUS: record[m] = (m in role_menus)
+    for role, menus in menu_config.items():
+        record = {"접속 역할 (Role)": role}
+        for m in ALL_MENUS:
+            record[m] = "✅" if m in menus else "❌"
         records.append(record)
         
-    edited_df = st.data_editor(pd.DataFrame(records).drop(columns=["_role_key"]), hide_index=True, use_container_width=True)
-    if st.button("💾 변경된 설정 저장", type="primary"):
-        new_config = {}
-        for idx, row in edited_df.iterrows():
-            new_config[pd.DataFrame(records).iloc[idx]["_role_key"]] = [m for m in ALL_MENUS if row[m] == True]
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f: json.dump(new_config, f, ensure_ascii=False, indent=4)
-        st.success("✅ 메뉴 노출 설정 저장 완료!")
+    st.dataframe(pd.DataFrame(records), hide_index=True, use_container_width=True)
+
 
 elif selected_menu != ADMIN_MENU_NAME:
     try:
@@ -468,7 +456,7 @@ elif selected_menu != ADMIN_MENU_NAME:
 
             col_title, col_toggle = st.columns([7, 5])
             with col_title: st.markdown(f"#### 📦 [{selected_type}] 패킹 유형 현황", unsafe_allow_html=True)
-            with col_toggle: show_details = st.checkbox("🔘 세부 할당(대기) 상태 펼쳐보기", value=False)
+            with col_toggle: show_details = st.checkbox("🔘 세부 상태(미집하/대기) 펼쳐보기", value=False, key="toggle_packing_details")
 
             packing_rows = []
             for p_name in PACKING_TYPES:
@@ -476,30 +464,71 @@ elif selected_menu != ADMIN_MENU_NAME:
                 p_count = len(p_group)
                 p_ratio = (p_count / type_total * 100) if type_total > 0 else 0
                 
+                # 집하 / 미집하 수량 정확히 계산
+                p_has_pickup = p_group['배송집하일'] != 0
+                p_is_shipped = p_group['출고상태'] == '출고완료'
+                p_pickup_set = set(p_group[p_has_pickup & p_is_shipped]['출고번호'].dropna().unique())
+                p_unpickup_set = set(p_group[~p_has_pickup & p_is_shipped]['출고번호'].dropna().unique()) - p_pickup_set
+                
+                p_pickup_t = len(p_pickup_set)
+                p_unpickup_t = len(p_unpickup_set)
+                
+                # 보정 비율 분리 로직
                 if selected_type == '당일 배송':
                     p_adj_shipped = p_group[p_group['출고상태'] == '출고완료']['출고번호'].nunique()
+                    p_unpickup_unshipped = 0
                 else:
-                    p_has_pickup = p_group['배송집하일'] != 0
-                    p_is_shipped = p_group['출고상태'] == '출고완료'
-                    p_pickup_set = set(p_group[p_has_pickup & p_is_shipped]['출고번호'].dropna().unique())
-                    p_unpickup_set = set(p_group[~p_has_pickup & p_is_shipped]['출고번호'].dropna().unique()) - p_pickup_set
-                    p_adj_shipped = round(len(p_pickup_set) + (len(p_unpickup_set) * delay_ratio))
+                    p_unpickup_shipped = round(p_unpickup_t * delay_ratio)
+                    p_unpickup_unshipped = p_unpickup_t - p_unpickup_shipped 
+                    p_adj_shipped = p_pickup_t + p_unpickup_shipped
                     
                 p_unshipped = p_count - p_adj_shipped
                 
+                # 포장대기, 피킹대기 교정
                 if '할당상태' in p_group.columns:
-                    p_unalloc = p_group[p_group['할당상태'] == '재고부족']['출고번호'].nunique()
-                    p_packing_wait = p_group[(p_group['할당상태'] == '피킹완료') & (p_group['출고상태'] != '출고완료')]['출고번호'].nunique()
-                    p_alloc_wait = max(0, p_unshipped - p_packing_wait - p_unalloc)
+                    unshipped_group = p_group[p_group['출고상태'] != '출고완료']
+                    p_unalloc = unshipped_group[unshipped_group['할당상태'] == '재고부족']['출고번호'].nunique()
+                    p_packing_wait = unshipped_group[unshipped_group['할당상태'] == '피킹완료']['출고번호'].nunique()
+                    p_alloc_wait = unshipped_group[unshipped_group['할당상태'] == '완전할당(미피킹)']['출고번호'].nunique()
+                    
+                    sum_unshipped = p_unalloc + p_packing_wait + p_alloc_wait
+                    if sum_unshipped < len(unshipped_group):
+                        p_alloc_wait += (len(unshipped_group) - sum_unshipped)
                 else:
                     p_unalloc, p_packing_wait, p_alloc_wait = 0, 0, 0
 
-                packing_rows.append({'패킹타입': p_name, '주문': f"{p_count:,}", '비율(%)': f"{p_ratio:.1f}%", '출고완료': f"{p_adj_shipped:,}", '미출고': f"{p_unshipped:,}", '할당(포장대기)': f"{p_packing_wait:,}", '할당(할당대기)': f"{p_alloc_wait:,}", '미할당': f"{p_unalloc:,}"})
+                # 💡 [정렬 오류 수정] 순수 숫자로 입력
+                packing_rows.append({
+                    '패킹타입': p_name, 
+                    '주문': int(p_count), 
+                    '비율(%)': float(p_ratio), 
+                    '출고완료': int(p_adj_shipped), 
+                    '미출고': int(p_unshipped), 
+                    '출고완료(미집하)': int(p_unpickup_t),
+                    '할당(포장대기)': int(p_packing_wait), 
+                    '할당(피킹대기)': int(p_alloc_wait), 
+                    '미할당(재고부족)': int(p_unalloc)
+                })
 
             df_packing_summary = pd.DataFrame(packing_rows)
-            if not show_details: df_packing_summary = df_packing_summary.drop(columns=['할당(포장대기)', '할당(할당대기)'])
+            if not show_details: 
+                df_packing_summary = df_packing_summary.drop(columns=['출고완료(미집하)', '할당(포장대기)', '할당(피킹대기)'])
 
-            st.dataframe(df_packing_summary, column_config={col: st.column_config.TextColumn(col, alignment="center") for col in df_packing_summary.columns}, use_container_width=True, height=195, hide_index=True)
+            # 💡 [정렬 오류 수정] 숫자에 콤마 표시 기능 적용
+            col_configs = {'패킹타입': st.column_config.TextColumn("패킹타입", alignment="center")}
+            for col in df_packing_summary.columns:
+                if col == '비율(%)':
+                    col_configs[col] = st.column_config.NumberColumn(col, format="%.1f %%", alignment="center")
+                elif col != '패킹타입':
+                    col_configs[col] = st.column_config.NumberColumn(col, alignment="center")
+
+            st.dataframe(
+                df_packing_summary, 
+                column_config=col_configs, 
+                use_container_width=True, 
+                height=195, 
+                hide_index=True
+            )
 
             if '기준재고명' in group_type.columns and '기준재고번호' in group_type.columns:
                 ice_mask = group_type['기준재고명'].str.contains('아이스', na=False)
@@ -515,24 +544,59 @@ elif selected_menu != ADMIN_MENU_NAME:
 
     st.markdown("---")
 
+    # ==============================================================================
+    # --- 10. 메뉴 라우터 탭 연동 (💡 2차전: 에러 방어형 다이어트 적용) ---
+    # ==============================================================================
+    
+    # 🧱 1. 모든 메뉴가 기본적으로 깔고 가는 필수 뼈대 컬럼
+    base_cols = ['출고번호', '주문번호', 'OM셀러명', '데이터구분', '배송대분류', '배송유형', '출고상태', '할당상태', '패킹타입']
+    
+    # 🛠️ 2. 안전한 다이어트 시트 생성기
+    def get_diet_df(source_df, extra_cols):
+        target_cols = base_cols + extra_cols
+        valid_cols = [c for c in target_cols if c in source_df.columns]
+        return source_df[valid_cols].copy()
+
+    # 🚀 3. 메뉴별 전용 미니 시트 전달 (에러 캐치 기능 탑재)
     if selected_menu == "출고 CAPA 분석":
         st.info("🚧 **[개발 중]** 현장 상황에 맞춘 최적의 마감 예측 알고리즘을 설계하고 있습니다.")
+        
     elif selected_menu == "셀러별 출고 분석":
-        try: render_sellers_tab(group_type)
+        try: 
+            df_diet = get_diet_df(group_type, ['온도유형'])
+            render_sellers_tab(df_diet)
+        except KeyError as e:
+            st.error(f"❌ [셀러별 분석] 코드 안에서 {e} 컬럼을 찾고 있습니다! app.py의 extra_cols 배열에 단어를 추가해 주세요.")
         except NameError: st.error("🏢 `render_sellers_tab` 모듈 연결 실패.")
+        
     elif selected_menu == "상품별 출고 분석":
-        try: render_products_tab(group_type)
+        try: 
+            df_diet = get_diet_df(group_type, ['기준재고번호', '기준재고명', '주문수량'])
+            render_products_tab(df_diet)
+        except KeyError as e:
+            st.error(f"❌ [상품별 분석] 코드 안에서 {e} 컬럼을 찾고 있습니다! app.py의 extra_cols 배열에 단어를 추가해 주세요.")
         except NameError: st.error("❌ `render_products_tab` 모듈을 찾을 수 없습니다.")
+        
     elif selected_menu == "시간대별 주문 분석":
-        try: render_time_inflow_tab(group_type)
+        try: 
+            df_diet = get_diet_df(group_type, ['결제일시_dt', '시간대', '판매채널', '출고예정일'])
+            render_time_inflow_tab(df_diet)
+        except KeyError as e:
+            st.error(f"❌ [시간대별 분석] 코드 안에서 {e} 컬럼을 찾고 있습니다! app.py의 extra_cols 배열에 단어를 추가해 주세요.")
         except NameError: st.error("❌ `render_time_inflow_tab` 모듈을 찾을 수 없습니다.")
+        
     elif selected_menu == "이종합포 묶음 헬퍼":
-        try: render_combinations_tab(df, selected_type) 
+        try: 
+            df_diet = get_diet_df(df, ['기준재고번호', '기준재고명', '주문수량', '온도유형'])
+            render_combinations_tab(df_diet, selected_type) 
+        except KeyError as e:
+            st.error(f"❌ [이종합포 헬퍼] 코드 안에서 {e} 컬럼을 찾고 있습니다! app.py의 extra_cols 배열에 단어를 추가해 주세요.")
         except NameError: st.error("❌ `render_combinations_tab` 모듈을 찾을 수 없습니다.")
-        except Exception as e: st.error(f"❌ 메뉴 실행 중 오류 발생: {e}")
+        
     elif selected_menu == "데이터 추출 및 다운로드":
-        try: render_download_tab(df, df_prev, data_filter)
+        try: 
+            render_download_tab(df, df_prev, data_filter)
         except NameError: st.error("❌ `render_download_tab` 모듈을 찾을 수 없습니다.")
-        except Exception as e: st.error(f"❌ 메뉴 실행 중 오류 발생: {e}")
 
+    # [스크롤 버그 방어막] 화면 최하단 강제 여백
     st.markdown("<div style='height: 100px;'></div>", unsafe_allow_html=True)

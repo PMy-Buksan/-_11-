@@ -68,7 +68,7 @@ def render_combinations_tab(df, global_delivery_filter="전체"):
     # 글로벌 배송 필터 연동
     if global_delivery_filter != "전체":
         keyword = global_delivery_filter.replace(" 배송", "").strip() 
-        df_multi = df_multi[df_multi['배송유형'].astype(str).str.contains(keyword)].copy()
+        df_multi = df_multi[df_multi['배송유형'].astype(str).str.contains(keyword, na=False)].copy()
 
     if df_multi.empty:
         st.info(f"메인에서 선택하신 [{global_delivery_filter}] 조건에 해당하는 물량이 없습니다.", icon="ℹ️")
@@ -79,9 +79,11 @@ def render_combinations_tab(df, global_delivery_filter="전체"):
         st.markdown("##### 🔍 작업 대상 조건 선택")
         
         with st.expander("✂️ 이미 작업한 주문번호 제외하기 (숨기기)"):
+            # 💡 [버그 픽스] 중복 충돌 방지를 위한 v2 네이밍
             excluded_input = st.text_area(
                 "WMS에서 이미 할당/작업 처리한 '주문번호'를 복사하여 붙여넣으세요. 실시간으로 목록에서 제외됩니다.", 
-                placeholder="예: 3835001, 3835002 ... (쉼표나 띄어쓰기, 줄바꿈으로 구분)"
+                placeholder="예: 3835001, 3835002 ... (쉼표나 띄어쓰기, 줄바꿈으로 구분)",
+                key="tab5_exclude_textarea_v2"
             )
         
         if excluded_input:
@@ -110,13 +112,13 @@ def render_combinations_tab(df, global_delivery_filter="전체"):
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            selected_seller_str = st.selectbox("🏢 셀러 선택", options=sellers_list)
+            selected_seller_str = st.selectbox("🏢 셀러 선택", options=sellers_list, key="tab5_seller_sel_v2")
             selected_seller = selected_seller_str.split(" (")[0] if selected_seller_str != "전체" else "전체"
         with col2:
-            selected_delivery = st.selectbox("🚚 배송유형 선택", options=delivery_types)
+            selected_delivery = st.selectbox("🚚 배송유형 선택", options=delivery_types, key="tab5_deliv_sel_v2")
         with col3:
             pack_opts = ["전체", "이종합포 (단일온도)", "혼합 (다중온도)"]
-            selected_pack_str = st.selectbox("📦 포장 유형 선택", options=pack_opts)
+            selected_pack_str = st.selectbox("📦 포장 유형 선택", options=pack_opts, key="tab5_pack_sel_v2")
 
     # 필터 적용
     df_filtered = df_multi.copy()
@@ -178,7 +180,6 @@ def render_combinations_tab(df, global_delivery_filter="전체"):
         }
 
         if exact_counts.empty:
-            # 💡 최소 세로 높이 유지용 박스
             st.info("100% 똑같이 구성된 상품 세트가 없습니다.", icon="ℹ️")
             st.markdown("<div style='height: 250px;'></div>", unsafe_allow_html=True)
         else:
@@ -195,7 +196,6 @@ def render_combinations_tab(df, global_delivery_filter="전체"):
             
             exact_display = exact_counts[['세트 분류', '구성품_텍스트', '품목수', '건수', '총 피킹수량']].copy()
 
-            # 💡 데이터프레임 높이 230px 통일
             event_track1 = st.dataframe(
                 exact_display,
                 column_config=exact_cols_config,
@@ -204,7 +204,7 @@ def render_combinations_tab(df, global_delivery_filter="전체"):
                 height=230,
                 on_select="rerun",
                 selection_mode="multi-row", 
-                key="track1"
+                key="tab5_track1_v2"
             )
 
             if event_track1 and event_track1.get("selection", {}).get("rows"):
@@ -244,7 +244,6 @@ def render_combinations_tab(df, global_delivery_filter="전체"):
                     st.success(f"👇 해당 세트의 **총 {len(sku_codes_exact)}개** 고유 상품코드(SKU)입니다.")
                     st.code(sku_str_exact, language="text")
             else:
-                # 클릭 전에도 바닥 높이를 살짝 비워두어 클릭 시 덜컥거림을 완화
                 st.markdown("<div style='height: 100px;'></div>", unsafe_allow_html=True)
 
     # -----------------------------------------------------------------------------------------
@@ -254,7 +253,7 @@ def render_combinations_tab(df, global_delivery_filter="전체"):
         col_anchor, _ = st.columns([4, 6])
         with col_anchor:
             anchor_options = [f"{i}개" for i in range(1, 9)]
-            selected_anchor_str = st.selectbox("⚙️ 겹치는 공통 상품 수 설정", options=anchor_options, index=1)
+            selected_anchor_str = st.selectbox("⚙️ 겹치는 공통 상품 수 설정", options=anchor_options, index=1, key="tab5_anchor_sel_v2")
             anchor_n = int(selected_anchor_str.replace("개", ""))
 
         st.markdown(f"#### 2. 유사 세트 (공통 상품 {anchor_n}개 묶음)")
@@ -308,7 +307,7 @@ def render_combinations_tab(df, global_delivery_filter="전체"):
                 height=230,
                 on_select="rerun",
                 selection_mode="multi-row", 
-                key="track2"
+                key="tab5_track2_v2"
             )
 
             if event_track2 and event_track2.get("selection", {}).get("rows"):
@@ -383,8 +382,8 @@ def render_combinations_tab(df, global_delivery_filter="전체"):
         col_prod, _ = st.columns([4, 6])
         with col_prod:
             prod_opts = [f"{i}종" for i in range(3, 16)]
-            target_sku_str = st.selectbox("⚙️ 한 번에 피킹할 상품 종류 수", options=prod_opts, index=2)
-            target_k = int(target_sku_str.replace("종", ""))
+            selected_target_sku_str = st.selectbox("⚙️ 한 번에 피킹할 상품 종류 수", options=prod_opts, index=2, key="tab5_prod_sel_v2")
+            target_k = int(selected_target_sku_str.replace("종", ""))
 
         valid_boxes = {b: items for b, items in box_to_items.items() if len(items) <= target_k}
         
@@ -471,7 +470,7 @@ def render_combinations_tab(df, global_delivery_filter="전체"):
                     height=230,
                     on_select="rerun",
                     selection_mode="multi-row", 
-                    key="track3"
+                    key="tab5_track3_v2"
                 )
 
                 if event_track3 and event_track3.get("selection", {}).get("rows"):
