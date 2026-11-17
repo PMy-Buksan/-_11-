@@ -557,9 +557,16 @@ elif selected_menu != ADMIN_MENU_NAME:
         valid_cols = [c for c in target_cols if c in source_df.columns]
         return source_df[valid_cols].copy()
 
-    # 🚀 3. 메뉴별 전용 미니 시트 전달 (에러 캐치 기능 탑재)
+# 🚀 3. 메뉴별 전용 미니 시트 전달 (에러 캐치 기능 탑재)
     if selected_menu == "출고 CAPA 분석":
-        st.info("🚧 **[개발 중]** 현장 상황에 맞춘 최적의 마감 예측 알고리즘을 설계하고 있습니다.")
+        try:
+            # CAPA 분석에 필요한 필수 컬럼들 (결제일시, 시간대 등)을 담아 보냅니다.
+            df_diet = get_diet_df(group_type, ['결제일시_dt', '시간대', '출고예정일'])
+            render_dispatch_tab(df_diet)
+        except KeyError as e:
+            st.error(f"❌ [출고 CAPA 분석] 코드 안에서 {e} 컬럼을 찾고 있습니다! app.py의 extra_cols 배열에 추가해 주세요.")
+        except NameError:
+            st.error("❌ `render_dispatch_tab` 모듈을 찾을 수 없습니다.")
         
     elif selected_menu == "셀러별 출고 분석":
         try: 
