@@ -131,7 +131,12 @@ def render_dispatch_tab(df):
     current_t = time_to_float(current_time_dt.time())
     
     cutoff_t = time_to_float(cs["cutoff_time"])
-    dominant_cutoff_t = 22.0
+    
+    # 💡 [핵심] 일반배송은 24시, 휴일배송은 22시로 마감시간을 정확히 분기
+    if dominant_name == "휴일배송":
+        dominant_cutoff_t = 22.0
+    else:
+        dominant_cutoff_t = 24.0
     
     is_today_closed = (current_t >= cutoff_t)
     is_dominant_closed = (current_t >= dominant_cutoff_t)
@@ -395,7 +400,6 @@ def render_dispatch_tab(df):
                 date_str = current_time_dt.strftime(f'%m월 %d일({wday})')
                 hour_str = f"{current_time_dt.hour}시"
                 
-                # 💡 [요청 반영] 마우스 오버 시 자동으로 '복사(Copy)' 버튼이 나타나는 st.code 활용!
                 st.markdown("<div style='font-size: 15px; font-weight: bold; color: #FFEB3B; margin-bottom: 5px;'>💬 집하 카톡</div>", unsafe_allow_html=True)
                 
                 msg_text = f"{date_str} 인천3센터 {hour_str}기준\n\n현시각 유입량 : {current_dominant_qty:,}건\n(쌀 {qty_rice:,}건) (SK스토아 {qty_sk:,}건) (연세 {qty_yonsei:,}건)\n추가 유입예상량 : 약 {adjusted_add_qty:,}건\n금일 약 {rounded_total:,}건 유입 예상되오니 참고바랍니다."
