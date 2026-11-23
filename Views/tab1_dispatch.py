@@ -2,6 +2,7 @@ import pandas as pd
 import streamlit as st
 import datetime
 import uuid
+import math
 
 def render_dispatch_tab(df):
     if df.empty:
@@ -18,14 +19,13 @@ def render_dispatch_tab(df):
             "u_avg_today": None,
             "u_avg_normal": None,
             "events": [
-                # 💡 [요청 반영] 초기 기본 행사 1개만 깔끔하게 세팅
-                {"id": str(uuid.uuid4()), "name": "SK 스토아", "item_name": "", "del_type": "일반(휴일)", "packing": "기타", "qty": 30, "done": False}
+                {"id": str(uuid.uuid4()), "name": "SK 스토아", "item_name": "", "del_type": "일반배송", "packing": "기타", "qty": 30, "done": False}
             ]
         }
     else:
         for ev in st.session_state.capa_state.get("events", []):
             if "item_name" not in ev: ev["item_name"] = ""
-            if "del_type" not in ev: ev["del_type"] = "일반(휴일)"
+            if "del_type" not in ev: ev["del_type"] = "일반배송"
             if "packing" not in ev: ev["packing"] = "기타"
             if "done" not in ev: ev["done"] = False
 
@@ -50,11 +50,40 @@ def render_dispatch_tab(df):
     current_hour = current_time_dt.hour
     current_time_str = current_time_dt.strftime('%H:%M')
 
-    current_today_qty = df_active[df_active['배송대분류'] == '당일 배송']['출고번호'].nunique() if '배송대분류' in df_active.columns else 0
-    current_normal_qty = df_active[df_active['배송대분류'] == '일반 배송']['출고번호'].nunique() if '배송대분류' in df_active.columns else df_active['출고번호'].nunique()
-    
-    has_today = '당일 배송' in df_active['배송대분류'].unique() if '배송대분류' in df_active.columns else False
-    has_normal = '일반 배송' in df_active['배송대분류'].unique() if '배송대분류' in df_active.columns else True
+    if '배송대분류' in df_active.columns:
+        cond_today = df_active['배송대분류'].str.contains('당일', na=False)
+        cond_holi = df_active['배송대분류'].str.contains('휴일', na=False)
+        cond_norm = df_active['배송대분류'].str.contains('일반', na=False)
+        
+        current_today_qty = df_active[cond_today]['출고번호'].nunique()
+        qty_holi = df_active[cond_holi]['출고번호'].nunique()
+        qty_norm = df_active[cond_norm]['출고번호'].nunique()
+        
+        if qty_holi >= qty_norm and qty_holi > 0:
+            dominant_name = "휴일배송"
+            minor_name = "일반배송"
+            cond_dominant = cond_holi
+            current_dominant_qty = qty_holi
+            current_minor_qty = qty_norm
+        else:
+            dominant_name = "일반배송"
+            minor_name = "휴일배송"
+            cond_dominant = cond_norm
+            current_dominant_qty = qty_norm
+            current_minor_qty = qty_holi
+            
+        has_today = cond_today.any()
+        has_dominant = cond_dominant.any()
+    else:
+        current_today_qty = 0
+        current_dominant_qty = df_active['출고번호'].nunique()
+        current_minor_qty = 0
+        has_today = False
+        has_dominant = True
+        cond_today = pd.Series(False, index=df_active.index)
+        cond_dominant = pd.Series(True, index=df_active.index)
+        dominant_name = "일반배송"
+        minor_name = "휴일배송"
 
     # ==============================================================================
     # 1. 자동 평균 및 최근 1시간 인입량 계산 엔진
@@ -95,13 +124,17 @@ def render_dispatch_tab(df):
         avg_3h_val = int(round(sum(collected) / len(collected))) if collected else 0
         return avg_3h_val, recent_1h_val
 
-    auto_avg_today, recent_today = calculate_speed_metrics(df_active[df_active['배송대분류'] == '당일 배송']) if has_today else (0, 0)
-    auto_avg_normal, recent_normal = calculate_speed_metrics(df_active[df_active['배송대분류'] == '일반 배송']) if has_normal else (0, 0)
+    auto_avg_today, recent_today = calculate_speed_metrics(df_active[cond_today]) if has_today else (0, 0)
+    auto_avg_dominant, recent_dominant = calculate_speed_metrics(df_active[cond_dominant]) if has_dominant else (0, 0)
 
     def time_to_float(t): return t.hour + t.minute / 60.0
     current_t = time_to_float(current_time_dt.time())
+    
     cutoff_t = time_to_float(cs["cutoff_time"])
+    dominant_cutoff_t = 22.0
+    
     is_today_closed = (current_t >= cutoff_t)
+    is_dominant_closed = (current_t >= dominant_cutoff_t)
 
     # ==============================================================================
     # 2. UI 레이아웃 컨테이너 선언
@@ -131,15 +164,13 @@ def render_dispatch_tab(df):
             st.markdown("**🚀 시간당 유입 (건/h)**")
             speed_c1, speed_c2 = st.columns(2)
             
-            if is_today_closed: auto_avg_today = 0
-            
             val_today = int(auto_avg_today) if cs["u_avg_today"] is None else cs["u_avg_today"]
             user_avg_today = speed_c1.number_input("당일배송 유입", min_value=0, value=val_today, step=10, disabled=(not has_today or is_today_closed))
             cs["u_avg_today"] = user_avg_today
             
-            val_normal = int(auto_avg_normal) if cs["u_avg_normal"] is None else cs["u_avg_normal"]
-            user_avg_normal = speed_c2.number_input("일반배송 유입", min_value=0, value=val_normal, step=10, disabled=not has_normal)
-            cs["u_avg_normal"] = user_avg_normal
+            val_dominant = int(auto_avg_dominant) if cs["u_avg_normal"] is None else cs["u_avg_normal"]
+            user_avg_dominant = speed_c2.number_input(f"{dominant_name} 유입", min_value=0, value=val_dominant, step=10, disabled=(not has_dominant or is_dominant_closed))
+            cs["u_avg_normal"] = user_avg_dominant
 
         st.markdown("<br>", unsafe_allow_html=True)
         
@@ -159,10 +190,14 @@ def render_dispatch_tab(df):
         events_to_keep = []
         need_rerun = False
         
-        del_options = ['일반(휴일)', '일반(휴일) / 당일']
+        del_options = [dominant_name, f'{dominant_name} / 당일']
         packing_options = ['단수', '단수단포', '단수합포', '이종합포', '혼합', '기타']
         
         for ev in cs["events"]:
+            if ev["del_type"] not in del_options:
+                if "당일" in ev["del_type"]: ev["del_type"] = f'{dominant_name} / 당일'
+                else: ev["del_type"] = dominant_name
+                
             c1, c2, c3, c4, c5, c6, c7 = st.columns(col_ratio)
             
             ev["name"] = c1.text_input("행사명", value=ev["name"], key=f"name_{ev['id']}", label_visibility="collapsed")
@@ -193,7 +228,7 @@ def render_dispatch_tab(df):
                 "id": str(uuid.uuid4()), 
                 "name": "", 
                 "item_name": "", 
-                "del_type": "일반(휴일)", 
+                "del_type": dominant_name, 
                 "packing": "기타", 
                 "qty": 0, 
                 "done": False
@@ -214,8 +249,11 @@ def render_dispatch_tab(df):
                     st.caption(f"- **[당일]** 🔴 마감 시간({cs['cutoff_time'].strftime('%H:%M')}) 종료됨 ➔ 추가 유입 차단(0건)")
                 else:
                     st.caption(f"- **[당일]** 시스템 평균: {auto_avg_today}건/h &nbsp;|&nbsp; 가장 최근 1시간: **{recent_today}건**")
-            if has_normal:
-                st.caption(f"- **[일반]** 시스템 평균: {auto_avg_normal}건/h &nbsp;|&nbsp; 가장 최근 1시간: **{recent_normal}건**")
+            if has_dominant:
+                if is_dominant_closed:
+                    st.caption(f"- **[{dominant_name}]** 🔴 마감 시간 종료됨 ➔ 추가 유입 차단(0건)")
+                else:
+                    st.caption(f"- **[{dominant_name}]** 시스템 평균: {auto_avg_dominant}건/h &nbsp;|&nbsp; 가장 최근 1시간: **{recent_dominant}건**")
             
             st.info("💡 최근 유입량 급증 시 하단 패널에서 '시간당 유입' 수치를 상향 조정하세요.")
 
@@ -228,70 +266,69 @@ def render_dispatch_tab(df):
                 st.success("✅ 현재 확인된 재고부족(미할당) 이슈가 없습니다.")
 
     # ==============================================================================
-    # 5. 구간별 남은 시간 및 예상 물량 계산 (Core Logic)
+    # 5. 구간별 남은 시간 및 예상 물량 계산 (신규 정밀 예측 엔진)
     # ==============================================================================
     spike_t = 21.0
     end_of_day = 24.0
 
+    t_points = sorted([current_t, cutoff_t, dominant_cutoff_t, spike_t, end_of_day])
+    t_points = [t for t in t_points if t >= current_t and t <= end_of_day]
+
     est_add_today = 0
-    est_add_normal = 0
-    
-    if current_t < end_of_day:
-        if current_t < cutoff_t:
-            hours_in_A = cutoff_t - current_t
-            est_add_today += (user_avg_today * hours_in_A)
-            est_add_normal += (user_avg_normal * hours_in_A)
+    est_add_dominant = 0
+
+    for i in range(len(t_points) - 1):
+        start = t_points[i]
+        end = t_points[i+1]
+        if start >= end: continue
+        
+        duration = end - start
+        
+        active_today = (start < cutoff_t)
+        active_dominant = (start < dominant_cutoff_t)
+        
+        current_today_speed = user_avg_today if active_today else 0
+        current_dominant_speed = user_avg_dominant if active_dominant else 0
+        
+        if not active_today and active_dominant:
+            current_dominant_speed += user_avg_today
             
-            merged_speed = user_avg_today + user_avg_normal
-            if cutoff_t < spike_t:
-                hours_in_B = spike_t - cutoff_t
-                est_add_normal += (merged_speed * hours_in_B)
-                hours_in_C = end_of_day - spike_t
-                spike_speed = merged_speed * (1 + (cs["spike_ratio"] / 100.0))
-                est_add_normal += (spike_speed * hours_in_C)
-                
-        else:
-            merged_speed = user_avg_today + user_avg_normal
-            if current_t < spike_t:
-                hours_in_B = spike_t - current_t
-                est_add_normal += (merged_speed * hours_in_B)
-                hours_in_C = end_of_day - spike_t
-                spike_speed = merged_speed * (1 + (cs["spike_ratio"] / 100.0))
-                est_add_normal += (spike_speed * hours_in_C)
-            else:
-                hours_in_C = end_of_day - current_t
-                spike_speed = merged_speed * (1 + (cs["spike_ratio"] / 100.0))
-                est_add_normal += (spike_speed * hours_in_C)
+        if start >= spike_t:
+            current_dominant_speed = current_dominant_speed * (1 + (cs["spike_ratio"] / 100.0))
+            
+        est_add_today += current_today_speed * duration
+        est_add_dominant += current_dominant_speed * duration
 
     est_add_today = int(round(est_add_today)) if has_today else 0
-    est_add_normal = int(round(est_add_normal)) if has_normal else 0
+    est_add_dominant = int(round(est_add_dominant)) if has_dominant else 0
 
     event_today_qty = 0
-    event_normal_qty = 0
+    event_dominant_qty = 0
     
     for ev in cs["events"]:
         if ev["done"]: continue 
         
-        if ev["del_type"] == "일반(휴일) / 당일":
+        if ev["del_type"] == f"{dominant_name} / 당일":
             if not is_today_closed:
                 event_today_qty += ev["qty"] 
             else:
-                event_normal_qty += ev["qty"] 
+                event_dominant_qty += ev["qty"] 
         else:
-            event_normal_qty += ev["qty"] 
+            event_dominant_qty += ev["qty"] 
 
     final_today = current_today_qty + est_add_today + event_today_qty
-    final_normal = current_normal_qty + est_add_normal + event_normal_qty
-    final_total = final_today + final_normal
+    final_dominant = current_dominant_qty + est_add_dominant + event_dominant_qty
+    
+    final_total = final_today + final_dominant + current_minor_qty
 
     # ==============================================================================
-    # 6. [Zone 1] 최상단 대시보드 출력 렌더링
+    # 6. [Zone 1] 최상단 대시보드 출력 렌더링 및 업체별 수량 추출
     # ==============================================================================
     with zone1_dashboard:
         st.markdown("## 🎯 1. 오늘의 최종 출고 예상 물량")
         st.caption("현장 변수(마감시간, 야간할증, 행사물량)와 유입 속도가 실시간 반영된 순수 예상 출고량입니다. **(재고부족 제외 완료)**")
         
-        if has_today and has_normal:
+        if has_today and has_dominant:
             f_col1, f_col2, f_col3 = st.columns(3)
             f_col1.markdown(f"""
                 <div style="background-color: #11151C; padding: 20px; border-radius: 10px; border: 1px solid #333; text-align: center;">
@@ -301,28 +338,68 @@ def render_dispatch_tab(df):
                 </div>""", unsafe_allow_html=True)
             f_col2.markdown(f"""
                 <div style="background-color: #11151C; padding: 20px; border-radius: 10px; border: 1px solid #333; text-align: center;">
-                    <div style="font-size: 14px; color: #888;">🔵 일반/휴일배송</div>
-                    <div style="font-size: 32px; font-weight: bold; color: #448AFF; margin-top: 10px;">{final_normal:,} 건</div>
-                    <div style="font-size: 12px; color: #aaa; margin-top: 5px;">현재 {current_normal_qty:,} + 예측 {est_add_normal:,} + 행사 {event_normal_qty:,}</div>
+                    <div style="font-size: 14px; color: #888;">🔵 {dominant_name}</div>
+                    <div style="font-size: 32px; font-weight: bold; color: #448AFF; margin-top: 10px;">{final_dominant:,} 건</div>
+                    <div style="font-size: 12px; color: #aaa; margin-top: 5px;">현재 {current_dominant_qty:,} + 예측 {est_add_dominant:,} + 행사 {event_dominant_qty:,}</div>
                 </div>""", unsafe_allow_html=True)
+            
+            minor_text = f"<div style='font-size: 12px; color: #aaa; margin-top: 5px;'>(※ 예측 제외된 {minor_name} {current_minor_qty:,}건 포함)</div>" if current_minor_qty > 0 else ""
             f_col3.markdown(f"""
                 <div style="background-color: #1E2530; padding: 20px; border-radius: 10px; border: 2px solid #4CAF50; text-align: center;">
                     <div style="font-size: 15px; font-weight: bold; color: #4CAF50;">📦 오늘 쳐내야 할 총 합계 물량</div>
                     <div style="font-size: 38px; font-weight: bold; color: #FFFFFF; margin-top: 5px;">{final_total:,} 건</div>
+                    {minor_text}
                 </div>""", unsafe_allow_html=True)
-        elif has_today and not has_normal:
+                
+        elif has_today and not has_dominant:
             st.markdown(f"""
                 <div style="background-color: #1E2530; padding: 30px; border-radius: 10px; border: 2px solid #FF5252; text-align: center;">
                     <div style="font-size: 16px; font-weight: bold; color: #FF5252;">🔴 당일배송 최종 예상 물량 (마감 {cs['cutoff_time'].strftime('%H:%M')} 기준)</div>
                     <div style="font-size: 45px; font-weight: bold; color: #FFFFFF; margin-top: 10px;">{final_today:,} 건</div>
                     <div style="font-size: 14px; color: #aaa; margin-top: 5px;">(누적 {current_today_qty:,}건 + 예측 {est_add_today:,}건 + 행사 {event_today_qty:,}건)</div>
                 </div>""", unsafe_allow_html=True)
-        elif has_normal and not has_today:
-            st.markdown(f"""
-                <div style="background-color: #1E2530; padding: 30px; border-radius: 10px; border: 2px solid #448AFF; text-align: center;">
-                    <div style="font-size: 16px; font-weight: bold; color: #448AFF;">🔵 일반/휴일배송 최종 예상 물량 (야간할증 {cs['spike_ratio']}% 적용)</div>
-                    <div style="font-size: 45px; font-weight: bold; color: #FFFFFF; margin-top: 10px;">{final_normal:,} 건</div>
-                    <div style="font-size: 14px; color: #aaa; margin-top: 5px;">(누적 {current_normal_qty:,}건 + 예측 {est_add_normal:,}건 + 행사 {event_normal_qty:,}건)</div>
-                </div>""", unsafe_allow_html=True)
+                
+        elif has_dominant and not has_today:
+            d_col1, d_col2 = st.columns(2)
+            
+            with d_col1:
+                st.markdown(f"""
+                    <div style="background-color: #1E2530; padding: 30px; border-radius: 10px; border: 2px solid #448AFF; text-align: center; height: 100%;">
+                        <div style="font-size: 16px; font-weight: bold; color: #448AFF;">🔵 {dominant_name} 최종 예상 물량</div>
+                        <div style="font-size: 45px; font-weight: bold; color: #FFFFFF; margin-top: 10px;">{final_dominant:,} 건</div>
+                        <div style="font-size: 14px; color: #aaa; margin-top: 5px;">(누적 {current_dominant_qty:,}건 + 예측 {est_add_dominant:,}건 + 행사 {event_dominant_qty:,}건)</div>
+                    </div>""", unsafe_allow_html=True)
+            
+            with d_col2:
+                qty_rice, qty_sk, qty_yonsei = 0, 0, 0
+                
+                seller_col = None
+                for col in ['OM셀러', 'OM셀러명', '판매처', '고객사', '업체명', '쇼핑몰', '셀러']:
+                    if col in df_active.columns:
+                        seller_col = col
+                        break
+                        
+                if seller_col:
+                    df_dom = df_active[cond_dominant]
+                    qty_rice = df_dom[df_dom[seller_col].str.contains('옥정영농|자연이랑|명성정미소', na=False, case=False)]['출고번호'].nunique()
+                    qty_sk = df_dom[df_dom[seller_col].str.contains('SK스토아|SK 스토아|SK', na=False, case=False)]['출고번호'].nunique()
+                    qty_yonsei = df_dom[df_dom[seller_col].str.contains('연세', na=False, case=False)]['출고번호'].nunique()
+                
+                buffered_total = final_dominant + 200
+                rounded_total = math.ceil(buffered_total / 100.0) * 100
+                
+                adjusted_add_qty = max(0, rounded_total - current_dominant_qty)
+                
+                weekdays = ['월', '화', '수', '목', '금', '토', '일']
+                wday = weekdays[current_time_dt.weekday()]
+                date_str = current_time_dt.strftime(f'%m월 %d일({wday})')
+                hour_str = f"{current_time_dt.hour}시"
+                
+                # 💡 [요청 반영] 마우스 오버 시 자동으로 '복사(Copy)' 버튼이 나타나는 st.code 활용!
+                st.markdown("<div style='font-size: 15px; font-weight: bold; color: #FFEB3B; margin-bottom: 5px;'>💬 집하 카톡</div>", unsafe_allow_html=True)
+                
+                msg_text = f"{date_str} 인천3센터 {hour_str}기준\n\n현시각 유입량 : {current_dominant_qty:,}건\n(쌀 {qty_rice:,}건) (SK스토아 {qty_sk:,}건) (연세 {qty_yonsei:,}건)\n추가 유입예상량 : 약 {adjusted_add_qty:,}건\n금일 약 {rounded_total:,}건 유입 예상되오니 참고바랍니다."
+                
+                st.code(msg_text, language="plaintext")
 
 # --- 파일 끝 ---
